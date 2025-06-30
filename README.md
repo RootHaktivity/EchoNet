@@ -1,0 +1,2 @@
+# EchoNet
+Discord Bot
