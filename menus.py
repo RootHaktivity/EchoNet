@@ -722,7 +722,7 @@ class RequestJoinButton(discord.ui.Button):
         super().__init__(
             label=f"Request to Join: {channel_name}",
             style=discord.ButtonStyle.primary,
-            custom_id=f"request_join_{channel_id}"
+            custom_id=f"reqjoin_{channel_id}"
         )
         self.channel_id = channel_id
         self.owner_id = owner_id
