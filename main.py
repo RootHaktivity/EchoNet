@@ -788,9 +788,59 @@ class ListChannelsView(discord.ui.View):
                     channel_info["pending_requests"].append(interact.user.id)
                     save_data()
                     owner_member = interact.guild.get_member(owner_id)
+                    requester = interact.user
+
+                    class ApproveDenyView(discord.ui.View):
+                        def __init__(self, timeout=300):
+                            super().__init__(timeout=timeout)
+                            self.value = None
+
+                        @discord.ui.button(label="Approve", style=discord.ButtonStyle.green)
+                        async def approve(self, button_interaction, button):
+                            # Grant connect permission
+                            channel = interact.guild.get_channel(cid)
+                            if channel:
+                                overwrites = channel.overwrites
+                                overwrites[requester] = discord.PermissionOverwrite(connect=True, view_channel=True)
+                                await channel.edit(overwrites=overwrites, reason="Approved join request")
+                            # Remove from pending
+                            if cid in temp_channels and requester.id in temp_channels[cid]["pending_requests"]:
+                                temp_channels[cid]["pending_requests"].remove(requester.id)
+                                save_data()
+                            await button_interaction.response.send_message(
+                                f"✅ You approved {requester.mention} to join **{channel.name}**.", ephemeral=True
+                            )
+                            try:
+                                await requester.send(f"✅ Your request to join **{channel.name}** was approved!")
+                            except:
+                                pass
+                            self.stop()
+
+                        @discord.ui.button(label="Deny", style=discord.ButtonStyle.red)
+                        async def deny(self, button_interaction, button):
+                            # Remove from pending
+                            if cid in temp_channels and requester.id in temp_channels[cid]["pending_requests"]:
+                                temp_channels[cid]["pending_requests"].remove(requester.id)
+                                save_data()
+                            await button_interaction.response.send_message(
+                                f"❌ You denied {requester.mention}'s request to join **{channel.name}**.", ephemeral=True
+                            )
+                            try:
+                                await requester.send(f"❌ Your request to join **{channel.name}** was denied.")
+                            except:
+                                pass
+                            self.stop()
+
                     if owner_member:
-                        await owner_member.send(f"{interact.user.mention} wants to join your voice channel!")
-                        await interact.response.send_message("Request sent to the channel owner!", ephemeral=True)
+                        try:
+                            channel = interact.guild.get_channel(cid)
+                            await owner_member.send(
+                                f"{requester.mention} wants to join your voice channel **{channel.name}**.",
+                                view=ApproveDenyView()
+                            )
+                            await interact.response.send_message("Request sent to the channel owner!", ephemeral=True)
+                        except Exception:
+                            await interact.response.send_message("Could not DM the channel owner.", ephemeral=True)
                     else:
                         await interact.response.send_message("Channel owner not found!", ephemeral=True)
                 button.callback = request_callback
