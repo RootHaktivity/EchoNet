@@ -60,22 +60,23 @@ async def delete_management_menu_and_restore_main(menu_text_channel, management_
 # --- UI Classes ---
 
 class ApproveDenyView(discord.ui.View):
-    def __init__(self, cid=None, requester_id=None, guild_id=None):
+    def __init__(self, cid=None, requester_id=None, guild_id=None, bot=None):
         super().__init__(timeout=None)
         self.cid = cid
         self.requester_id = requester_id
         self.guild_id = guild_id
+        self.bot = bot
 
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, custom_id="approve_request")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from main import bot, temp_channels, save_data
+        from main import temp_channels, save_data
         global temp_channels
 
-        if not self.cid or not self.requester_id or not self.guild_id:
+        if not self.cid or not self.requester_id or not self.guild_id or not self.bot:
             await interaction.response.send_message("❌ Could not process approval - missing information.", ephemeral=True)
             return
 
-        guild = bot.get_guild(self.guild_id)
+        guild = self.bot.get_guild(self.guild_id)
         if not guild:
             await interaction.response.send_message("❌ Could not find the server.", ephemeral=True)
             return
@@ -118,14 +119,14 @@ class ApproveDenyView(discord.ui.View):
 
     @discord.ui.button(label="Deny", style=discord.ButtonStyle.red, custom_id="deny_request")
     async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from main import bot, temp_channels, save_data
+        from main import temp_channels, save_data
         global temp_channels
 
-        if not self.cid or not self.requester_id or not self.guild_id:
+        if not self.cid or not self.requester_id or not self.guild_id or not self.bot:
             await interaction.response.send_message("❌ Could not process denial - missing information.", ephemeral=True)
             return
 
-        guild = bot.get_guild(self.guild_id)
+        guild = self.bot.get_guild(self.guild_id)
         if not guild:
             await interaction.response.send_message("❌ Could not find the server.", ephemeral=True)
             return
@@ -761,7 +762,8 @@ class RequestJoinButton(discord.ui.Button):
                 view = ApproveDenyView(
                     cid=self.channel_id,
                     requester_id=self.requester_id,
-                    guild_id=interaction.guild.id
+                    guild_id=interaction.guild.id,
+                    bot=interaction.client
                 )
                 await owner.send(embed=embed, view=view)
             except:
