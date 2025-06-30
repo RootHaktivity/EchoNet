@@ -17,6 +17,18 @@ bot.remove_command("help")
 
 temp_channels = {}
 
+SETTINGS_FILE = "echonet_settings.json"
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_settings(settings):
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f)
+
 def load_data():
     global temp_channels
     if os.path.exists("channels.json"):
@@ -118,73 +130,39 @@ class MainMenu(discord.ui.View):
 
     @discord.ui.button(label="🎤 Create Voice Channel", style=discord.ButtonStyle.green, emoji="🎤")
     async def create_channel(self, interaction, button):
-        view = CategoryTextChannelSelectView(interaction.user.id, interaction.guild)
-        await interaction.response.edit_message(content="Please select the category and text channel for your voice channel:", embed=None, view=view)
-
-    @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary)
-    async def list_channels(self, interaction, button):
-        view = ListChannelsView(interaction.user.id)
-        await view.send_channel_list(interaction)
-
-class CategoryTextChannelSelectView(discord.ui.View):
-    def __init__(self, user_id, guild):
-        super().__init__(timeout=60)
-        self.user_id = user_id
-        self.guild = guild
-        self.selected_category = None
-        self.selected_text_channel = None
-
-        categories = [c for c in guild.categories]
-        if not categories:
-            options = [discord.SelectOption(label="No categories found", value="none", description="Create a category first")]
-        else:
-            options = [discord.SelectOption(label=c.name, value=str(c.id)) for c in categories]
-
-        self.category_select = discord.ui.Select(placeholder="Select a category", options=options)
-        self.category_select.callback = self.category_selected
-        self.add_item(self.category_select)
-
-    async def category_selected(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
+        settings = load_settings()
+        guild_id = str(interaction.guild.id)
+        if guild_id not in settings:
+            await interaction.response.send_message(
+                "❌ Setup not complete. Please ask an admin to run `!echonetsetup` first.",
+                ephemeral=True
+            )
             return
 
-        if self.category_select.values[0] == "none":
-            await interaction.response.send_message("❌ No categories available. Please create one first.", ephemeral=True)
+        category_id = settings[guild_id]["category_id"]
+        text_channel_id = settings[guild_id]["text_channel_id"]
+        category = interaction.guild.get_channel(category_id)
+        text_channel = interaction.guild.get_channel(text_channel_id)
+
+        if not category or not text_channel:
+            await interaction.response.send_message(
+                "❌ The saved category or text channel no longer exists. Please ask an admin to run `!echonetsetup` again.",
+                ephemeral=True
+            )
             return
-
-        category_id = int(self.category_select.values[0])
-        self.selected_category = self.guild.get_channel(category_id)
-
-        text_channels = [ch for ch in self.selected_category.text_channels]
-        if not text_channels:
-            await interaction.response.send_message("❌ No text channels in this category. Please create one first.", ephemeral=True)
-            return
-
-        options = [discord.SelectOption(label=ch.name, value=str(ch.id)) for ch in text_channels]
-        self.text_channel_select = discord.ui.Select(placeholder="Select a text channel", options=options)
-        self.text_channel_select.callback = self.text_channel_selected
-
-        self.clear_items()
-        self.add_item(self.text_channel_select)
-
-        await interaction.response.edit_message(content="Select a text channel for the menu:", view=self)
-
-    async def text_channel_selected(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
-            return
-
-        text_channel_id = int(self.text_channel_select.values[0])
-        self.selected_text_channel = self.guild.get_channel(text_channel_id)
 
         embed = discord.Embed(
             title="⏰ Channel Duration",
             description="How long should your voice channel last?",
             color=0x00ff00
         )
-        view = DurationView(self.user_id, interaction.channel, category=self.selected_category, menu_text_channel=self.selected_text_channel)
-        await interaction.response.edit_message(embed=embed, view=view)
+        view = DurationView(interaction.user.id, interaction.channel, category=category, menu_text_channel=text_channel)
+        await interaction.response.edit_message(embed=embed, view=view, content=None)
+
+    @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary)
+    async def list_channels(self, interaction, button):
+        view = ListChannelsView(interaction.user.id)
+        await view.send_channel_list(interaction)
 
 class DurationView(discord.ui.View):
     def __init__(self, user_id, channel, category=None, menu_text_channel=None):
@@ -304,7 +282,10 @@ class AccessTypeView(discord.ui.View):
         guild = interaction.guild
         user = interaction.user
 
-        category = self.category or discord.utils.get(guild.categories, name="ℙ𝕣𝕚𝕧𝕒𝕥𝕖 𝕍𝕠𝕚𝕔𝕖 ℂ𝕣𝕖𝕒𝕥𝕠𝕣")
+        category = self.category
+        if not category:
+            await self.channel.send("❌ No category set. Please ask an admin to run `!echonetsetup`.")
+            return
 
         if request_only:
             overwrites = {
@@ -327,9 +308,9 @@ class AccessTypeView(discord.ui.View):
             reason="User-created custom voice channel"
         )
 
-        menu_text_channel = self.menu_text_channel or discord.utils.get(guild.text_channels, name="vc-menu")
+        menu_text_channel = self.menu_text_channel
         if not menu_text_channel:
-            await self.channel.send("❌ Could not find the menu text channel! Please create it first.")
+            await self.channel.send("❌ Could not find the menu text channel! Please ask an admin to run `!echonetsetup`.")
             return
 
         async for msg in menu_text_channel.history(limit=100):
@@ -495,6 +476,63 @@ async def voice_command(ctx):
     )
     await ctx.send(embed=embed, view=view)
 
+@bot.command(name="echonetsetup")
+@commands.has_permissions(manage_channels=True)
+async def echonetsetup_command(ctx):
+    def check_author(m):
+        return m.author == ctx.author and m.channel == ctx.channel
+
+    guild = ctx.guild
+
+    # Step 1: Pick category for new voice channels
+    categories = [c for c in guild.categories]
+    if not categories:
+        await ctx.send("❌ No categories found. Please create a category first.")
+        return
+
+    category_list = "\n".join(f"{i+1}. {c.name}" for i, c in enumerate(categories))
+    await ctx.send(f"Please type the number of the category to use for new voice channels:\n{category_list}")
+
+    try:
+        cat_msg = await bot.wait_for("message", check=check_author, timeout=60)
+        cat_idx = int(cat_msg.content.strip()) - 1
+        if cat_idx < 0 or cat_idx >= len(categories):
+            await ctx.send("❌ Invalid selection.")
+            return
+        category = categories[cat_idx]
+    except (ValueError, asyncio.TimeoutError):
+        await ctx.send("❌ Invalid or timed out. Please try again.")
+        return
+
+    # Step 2: Pick text channel for menu
+    text_channels = [ch for ch in guild.text_channels]
+    if not text_channels:
+        await ctx.send("❌ No text channels found. Please create one first.")
+        return
+
+    text_list = "\n".join(f"{i+1}. {ch.name}" for i, ch in enumerate(text_channels))
+    await ctx.send(f"Please type the number of the text channel to use for the menu:\n{text_list}")
+
+    try:
+        txt_msg = await bot.wait_for("message", check=check_author, timeout=60)
+        txt_idx = int(txt_msg.content.strip()) - 1
+        if txt_idx < 0 or txt_idx >= len(text_channels):
+            await ctx.send("❌ Invalid selection.")
+            return
+        text_channel = text_channels[txt_idx]
+    except (ValueError, asyncio.TimeoutError):
+        await ctx.send("❌ Invalid or timed out. Please try again.")
+        return
+
+    # Save settings
+    settings = load_settings()
+    settings[str(guild.id)] = {
+        "category_id": category.id,
+        "text_channel_id": text_channel.id
+    }
+    save_settings(settings)
+    await ctx.send(f"✅ Setup complete! New voice channels will be created in **{category.name}**, and the menu will be posted in **{text_channel.name}**.")
+
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(
@@ -503,6 +541,7 @@ async def help_command(ctx):
         color=0x0099ff
     )
     embed.add_field(name="!voice", value="Create a temporary voice channel", inline=False)
+    embed.add_field(name="!echonetsetup", value="Set the default category and menu text channel (admin only)", inline=False)
     embed.add_field(name="!help", value="Show this help message", inline=False)
     await ctx.send(embed=embed)
 
