@@ -161,7 +161,7 @@ class MainMenu(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎤 Create Voice Channel", style=discord.ButtonStyle.green, emoji="🎤", custom_id="mainmenu_create")
+    @discord.ui.button(label="🎤 Create Voice Channel", style=discord.ButtonStyle.green, custom_id="mainmenu_create")
     async def create_channel(self, interaction, button):
         settings = load_settings()
         guild_id = str(interaction.guild.id)
