@@ -130,7 +130,7 @@ async def voice_command(ctx):
     missing_perms = check_text_channel_permissions(menu_text_channel)
     if missing_perms:
         perm_error = format_permission_error(missing_perms, f"Text Channel {menu_text_channel.name}")
-        await ctx.send(f"❌ Cannot set up menu due to missing permissions:\n{perm_error}\n\nPlease grant these permissions and try again.")
+        await ctx.send(f"❌ Cannot set up menu due to missing permissions:\\n{perm_error}\\n\\nPlease grant these permissions and try again.")
         return
     await purge_menu_text_channel(menu_text_channel)
     await ensure_main_menu(menu_text_channel)
@@ -171,7 +171,7 @@ async def echonetstats_command(ctx):
         if channel_info:
             embed.add_field(
                 name="Recent Channels", 
-                value="\n".join(channel_info), 
+                value="\\n".join(channel_info), 
                 inline=False
             )
     await ctx.send(embed=embed)
@@ -185,22 +185,22 @@ async def help_command(ctx):
     )
     embed.add_field(
         name="👤 User Commands",
-        value="`!voice` - Set up the main menu\n`!help` - Show this help message",
+        value="`!voice` - Set up the main menu\\n`!help` - Show this help message",
         inline=False
     )
     embed.add_field(
         name="👑 Admin Commands",
-        value="`!echonetsetup` - Initial bot setup\n`!echonetdiagnose` - Check permissions\n`!echonetstats` - Show statistics",
+        value="`!echonetsetup` - Initial bot setup\\n`!echonetdiagnose` - Check permissions\\n`!echonetstats` - Show statistics",
         inline=False
     )
     embed.add_field(
         name="✨ Features",
-        value="• Create temporary voice channels\n• Set custom duration (1-60 days)\n• Choose access type (Open/Request Only)\n• Full channel management\n• User blocking system\n• Ownership transfer",
+        value="• Create temporary voice channels\\n• Set custom duration (1-60 days)\\n• Choose access type (Open/Request Only)\\n• Full channel management\\n• User blocking system\\n• Ownership transfer",
         inline=False
     )
     embed.add_field(
         name="🔧 Setup Instructions",
-        value="1. Run `!echonetsetup` to configure the bot\n2. Run `!voice` to create the main menu\n3. Users can now create channels!",
+        value="1. Run `!echonetsetup` to configure the bot\\n2. Run `!voice` to create the main menu\\n3. Users can now create channels!",
         inline=False
     )
     embed.set_footer(text="EchoNet Bot - Making voice channels easy!")
