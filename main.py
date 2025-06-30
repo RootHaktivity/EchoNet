@@ -136,7 +136,7 @@ class ChannelActionsView(discord.ui.View):
         self.owner_id = owner_id
 
     @discord.ui.button(label="🗑️ Delete Channel", style=discord.ButtonStyle.danger)
-    async def delete_channel(self, button, interaction):
+    async def delete_channel(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("❌ Only the channel owner can delete it!", ephemeral=True)
             return
@@ -166,7 +166,7 @@ class ChannelActionsView(discord.ui.View):
             await interaction.response.send_message(f"❌ Failed to delete channel: {str(e)}", ephemeral=True)
 
     @discord.ui.button(label="✏️ Edit Channel", style=discord.ButtonStyle.secondary)
-    async def edit_channel(self, button, interaction):
+    async def edit_channel(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("❌ Only the channel owner can edit it!", ephemeral=True)
             return
@@ -180,12 +180,12 @@ class ChannelActionsView(discord.ui.View):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary)
-    async def list_channels(self, button, interaction):
+    async def list_channels(self, interaction, button):  # Fixed parameter order
         view = ListChannelsView(interaction.user.id)
         await view.send_channel_list(interaction)
 
     @discord.ui.button(label="🎤 Create Voice Channel", style=discord.ButtonStyle.green)
-    async def create_voice_channel(self, button, interaction):
+    async def create_voice_channel(self, interaction, button):  # Fixed parameter order
         embed = discord.Embed(
             title="🎤 Voice Channel Creator",
             description="Create your own temporary voice channel!",
@@ -195,7 +195,7 @@ class ChannelActionsView(discord.ui.View):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @discord.ui.button(label="👥 Manage Users", style=discord.ButtonStyle.secondary)
-    async def manage_users(self, button, interaction):
+    async def manage_users(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("❌ Only the channel owner can manage users!", ephemeral=True)
             return
@@ -245,7 +245,7 @@ class UserActionView(discord.ui.View):
         self.member = member
 
     @discord.ui.button(label="Kick User", style=discord.ButtonStyle.danger)
-    async def kick_user(self, button, interaction):
+    async def kick_user(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("❌ Only the channel owner can kick users!", ephemeral=True)
             return
@@ -266,7 +266,7 @@ class UserActionView(discord.ui.View):
             await interaction.response.send_message(f"❌ Failed to kick user: {e}", ephemeral=True)
 
     @discord.ui.button(label="Block User", style=discord.ButtonStyle.red)
-    async def block_user(self, button, interaction):
+    async def block_user(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("❌ Only the channel owner can block users!", ephemeral=True)
             return
@@ -291,7 +291,7 @@ class UserActionView(discord.ui.View):
         await interaction.response.send_message(f"✅ Blocked {self.member.display_name} from joining the voice channel.", ephemeral=True)
 
     @discord.ui.button(label="Unblock User", style=discord.ButtonStyle.green)
-    async def unblock_user(self, button, interaction):
+    async def unblock_user(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message("❌ Only the channel owner can unblock users!", ephemeral=True)
             return
@@ -316,7 +316,7 @@ class UserActionView(discord.ui.View):
         await interaction.response.send_message(f"✅ Unblocked {self.member.display_name}.", ephemeral=True)
 
     @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary)
-    async def go_back(self, button, interaction):
+    async def go_back(self, interaction, button):  # Fixed parameter order
         channel = interaction.guild.get_channel(self.channel_id)
         if not channel:
             await interaction.response.send_message("❌ Voice channel not found!", ephemeral=True)
@@ -334,7 +334,7 @@ class EditChannelView(discord.ui.View):
         self.owner_id = owner_id
 
     @discord.ui.button(label="📝 Change Name", style=discord.ButtonStyle.secondary)
-    async def change_name(self, button, interaction):
+    async def change_name(self, interaction, button):  # Fixed parameter order
         await interaction.response.send_message("Please type the new name for your channel:", ephemeral=True)
 
         def check(m):
@@ -357,7 +357,7 @@ class EditChannelView(discord.ui.View):
             await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
 
     @discord.ui.button(label="🔄 Toggle Access", style=discord.ButtonStyle.secondary)
-    async def toggle_access(self, button, interaction):
+    async def toggle_access(self, interaction, button):  # Fixed parameter order
         if self.channel_id not in temp_channels:
             await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
             return
@@ -399,7 +399,7 @@ class ApprovalView(discord.ui.View):
         self.requester_id = requester_id
 
     @discord.ui.button(label="✅ Approve", style=discord.ButtonStyle.green)
-    async def approve(self, button, interaction):
+    async def approve(self, interaction, button):  # Fixed parameter order
         if self.channel_id not in temp_channels:
             await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
             return
@@ -426,7 +426,7 @@ class ApprovalView(discord.ui.View):
         save_data()
 
     @discord.ui.button(label="❌ Deny", style=discord.ButtonStyle.red)
-    async def deny(self, button, interaction):
+    async def deny(self, interaction, button):  # Fixed parameter order
         if self.channel_id not in temp_channels:
             await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
             return
@@ -458,7 +458,7 @@ class ListChannelsView(discord.ui.View):
         return interaction.user.id == self.user_id
 
     @discord.ui.button(label="Close", style=discord.ButtonStyle.red)
-    async def close(self, button: discord.ui.Button, interaction: discord.Interaction):
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):  # Fixed parameter order
         await interaction.message.delete()
 
     async def send_channel_list(self, interaction: discord.Interaction):
@@ -537,7 +537,7 @@ class MainMenu(discord.ui.View):
         return interaction.user.id == self.user_id
 
     @discord.ui.button(label="🎤 Create Voice Channel", style=discord.ButtonStyle.green, emoji="🎤")
-    async def create_channel(self, button, interaction):
+    async def create_channel(self, interaction, button):  # Fixed parameter order
         if self.user_id is not None and interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
             return
@@ -551,7 +551,7 @@ class MainMenu(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary)
-    async def list_channels(self, button, interaction):
+    async def list_channels(self, interaction, button):  # Fixed parameter order
         if self.user_id is not None and interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
             return
@@ -623,7 +623,7 @@ class DurationView(discord.ui.View):
         self.days = None
 
     @discord.ui.button(label="1 Day", style=discord.ButtonStyle.green)
-    async def one_day(self, button, interaction):
+    async def one_day(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
             return
@@ -631,7 +631,7 @@ class DurationView(discord.ui.View):
         await self.show_access_menu(interaction)
 
     @discord.ui.button(label="1 Week", style=discord.ButtonStyle.blurple)
-    async def one_week(self, button, interaction):
+    async def one_week(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
             return
@@ -639,7 +639,7 @@ class DurationView(discord.ui.View):
         await self.show_access_menu(interaction)
 
     @discord.ui.button(label="2 Weeks", style=discord.ButtonStyle.blurple)
-    async def two_weeks(self, button, interaction):
+    async def two_weeks(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
             return
@@ -647,7 +647,7 @@ class DurationView(discord.ui.View):
         await self.show_access_menu(interaction)
 
     @discord.ui.button(label="Custom", style=discord.ButtonStyle.gray)
-    async def custom_duration(self, button, interaction):
+    async def custom_duration(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
             return
@@ -697,14 +697,14 @@ class AccessTypeView(discord.ui.View):
         self.menu_text_channel = menu_text_channel
 
     @discord.ui.button(label="🌐 Open (Anyone can join)", style=discord.ButtonStyle.green)
-    async def open_access(self, button, interaction):
+    async def open_access(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
             return
         await self.ask_channel_name(interaction, request_only=False)
 
     @discord.ui.button(label="🔒 Request Only", style=discord.ButtonStyle.red)
-    async def request_access(self, button, interaction):
+    async def request_access(self, interaction, button):  # Fixed parameter order
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This isn't your menu!", ephemeral=True)
             return
