@@ -205,7 +205,7 @@ class MainMenu(discord.ui.View):
         view = DurationView(interaction.user.id, interaction.channel, category=category, menu_text_channel=text_channel)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    @discord.ui.button(label="🛠️ Manage My Channel", style=discord.ButtonStyle.blurple, emoji="🛠️", custom_id="mainmenu_manage")
+    @discord.ui.button(label="🛠️ Manage My Channel", style=discord.ButtonStyle.blurple, custom_id="mainmenu_manage")
     async def manage_channel(self, interaction, button):
         from main import temp_channels
         global temp_channels
@@ -244,7 +244,7 @@ class MainMenu(discord.ui.View):
             view = SelectChannelView(interaction.user.id, channel_options)
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary, emoji="📋", custom_id="mainmenu_list")
+    @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary, custom_id="mainmenu_list")
     async def list_channels(self, interaction, button):
         view = ListChannelsView(interaction.user.id, interaction.guild)
         await view.send_channel_list(interaction)
