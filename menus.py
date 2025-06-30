@@ -70,6 +70,7 @@ class ApproveDenyView(discord.ui.View):
     @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, custom_id="approve_request")
     async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
         from main import bot, temp_channels, save_data
+        global temp_channels
 
         if not self.cid or not self.requester_id or not self.guild_id:
             await interaction.response.send_message("❌ Could not process approval - missing information.")
@@ -119,6 +120,7 @@ class ApproveDenyView(discord.ui.View):
     @discord.ui.button(label="Deny", style=discord.ButtonStyle.red, custom_id="deny_request")
     async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
         from main import bot, temp_channels, save_data
+        global temp_channels
 
         if not self.cid or not self.requester_id or not self.guild_id:
             await interaction.response.send_message("❌ Could not process denial - missing information.")
@@ -206,6 +208,7 @@ class MainMenu(discord.ui.View):
     @discord.ui.button(label="🛠️ Manage My Channel", style=discord.ButtonStyle.blurple, emoji="🛠️", custom_id="mainmenu_manage")
     async def manage_channel(self, interaction, button):
         from main import temp_channels
+        global temp_channels
 
         owned = [cid for cid, info in temp_channels.items() if info["owner_id"] == interaction.user.id]
         if not owned:
@@ -379,7 +382,8 @@ class AccessTypeView(discord.ui.View):
             await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
 
     async def create_channel(self, interaction, request_only, channel_name):
-        from main import bot, temp_channels, save_data
+        from main import temp_channels, save_data
+        global temp_channels
         from data import load_settings
 
         expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=self.days)
@@ -462,5 +466,3 @@ class AccessTypeView(discord.ui.View):
         save_data()
 
         interaction.client.loop.create_task(delete_management_menu_and_restore_main(menu_text_channel, menu_message))
-
-# ... (rest of your code for ChannelActionsView, EditChannelView, BlockedUsersView, ListChannelsView remains unchanged)
