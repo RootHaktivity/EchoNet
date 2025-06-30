@@ -108,6 +108,8 @@ async def on_ready():
     print(f"✅ Bot logged in as {bot.user}")
     load_data()
     check_expired_channels.start()
+    # Register persistent main menu view so buttons always work
+    bot.add_view(MainMenu(None, None))
     print("🔄 Background tasks started")
 
 @bot.event
@@ -116,20 +118,58 @@ async def on_command_error(ctx, error):
         return
     raise error
 
+# --- Purge helper ---
+
+async def purge_menu_text_channel(menu_text_channel):
+    async for msg in menu_text_channel.history(limit=100):
+        # Only keep the main menu message (by content tag)
+        if not (msg.author == menu_text_channel.guild.me and msg.content.startswith(MAIN_MENU_TAG)):
+            try:
+                await msg.delete()
+            except:
+                pass
+
+async def delete_management_menu_and_restore_main(menu_text_channel, management_msg, delay=300):
+    await asyncio.sleep(delay)
+    try:
+        await management_msg.delete()
+    except:
+        pass
+    # Purge all other messages except the main menu
+    await purge_menu_text_channel(menu_text_channel)
+    # Check if the main menu is present, if not, re-post it
+    found_main_menu = False
+    async for msg in menu_text_channel.history(limit=20):
+        if msg.author == menu_text_channel.guild.me and msg.content.startswith(MAIN_MENU_TAG):
+            found_main_menu = True
+            break
+    if not found_main_menu:
+        embed = discord.Embed(
+            title="🎤 Voice Channel Creator",
+            description="Create your own temporary voice channel!",
+            color=0x00ff00
+        )
+        embed.add_field(
+            name="Features",
+            value="• Custom duration\n• Access control\n• Channel management",
+            inline=False
+        )
+        view = MainMenu(None, menu_text_channel)
+        await menu_text_channel.send(f"{MAIN_MENU_TAG}", embed=embed, view=view)
+
 # --- UI Classes ---
 
 class MainMenu(discord.ui.View):
     def __init__(self, user_id, channel):
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)  # Persistent view
         self.user_id = user_id
         self.channel = channel
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if self.user_id is None:
-            return True
-        return interaction.user.id == self.user_id
+        # Allow anyone to use the main menu if user_id is None
+        return True
 
-    @discord.ui.button(label="🎤 Create Voice Channel", style=discord.ButtonStyle.green, emoji="🎤")
+    @discord.ui.button(label="🎤 Create Voice Channel", style=discord.ButtonStyle.green, emoji="🎤", custom_id="mainmenu_create")
     async def create_channel(self, interaction, button):
         settings = load_settings()
         guild_id = str(interaction.guild.id)
@@ -160,15 +200,10 @@ class MainMenu(discord.ui.View):
         view = DurationView(interaction.user.id, interaction.channel, category=category, menu_text_channel=text_channel)
         await interaction.response.edit_message(embed=embed, view=view, content=None)
 
-    @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary, custom_id="mainmenu_list")
     async def list_channels(self, interaction, button):
         view = ListChannelsView(interaction.user.id)
         await view.send_channel_list(interaction)
-
-    @discord.ui.button(label="🛠️ Manage Voice Channel", style=discord.ButtonStyle.secondary)
-    async def manage_voice_channel(self, interaction, button):
-        # This could show a modal or a new menu for managing the user's own channel(s)
-        await interaction.response.send_message("Feature coming soon! (Or implement your own logic here.)", ephemeral=True)
 
 class DurationView(discord.ui.View):
     def __init__(self, user_id, channel, category=None, menu_text_channel=None):
@@ -319,7 +354,7 @@ class AccessTypeView(discord.ui.View):
             await self.channel.send("❌ Could not find the menu text channel! Please ask an admin to run `!echonetsetup`.")
             return
 
-        # Clean up all non-main-menu messages in the menu text channel
+        # Purge all messages except the main menu
         await purge_menu_text_channel(menu_text_channel)
 
         access_type = "🔒 Request Only" if request_only else "🌐 Open"
@@ -352,45 +387,6 @@ class AccessTypeView(discord.ui.View):
 
         # Schedule deletion of the management menu and re-post the main menu if needed
         bot.loop.create_task(delete_management_menu_and_restore_main(menu_text_channel, menu_message))
-
-async def purge_menu_text_channel(menu_text_channel):
-    # Delete all messages except the main menu
-    async for msg in menu_text_channel.history(limit=100):
-        if not (msg.author == menu_text_channel.guild.me and msg.content.startswith(MAIN_MENU_TAG)):
-            try:
-                await msg.delete()
-            except:
-                pass
-
-async def delete_management_menu_and_restore_main(menu_text_channel, management_msg, delay=300):
-    # Wait for the specified delay (default 5 minutes)
-    await asyncio.sleep(delay)
-    try:
-        await management_msg.delete()
-    except:
-        pass
-    # Check if the main menu is present, if not, re-post it
-    found_main_menu = False
-    async for msg in menu_text_channel.history(limit=20):
-        if msg.author == menu_text_channel.guild.me and msg.content.startswith(MAIN_MENU_TAG):
-            found_main_menu = True
-            break
-    if not found_main_menu:
-        await post_main_menu(menu_text_channel)
-
-async def post_main_menu(menu_text_channel):
-    embed = discord.Embed(
-        title="🎤 Voice Channel Creator",
-        description="Create your own temporary voice channel!",
-        color=0x00ff00
-    )
-    embed.add_field(
-        name="Features",
-        value="• Custom duration\n• Access control\n• Channel management",
-        inline=False
-    )
-    view = MainMenu(None, menu_text_channel)
-    await menu_text_channel.send(f"{MAIN_MENU_TAG}", embed=embed, view=view)
 
 class ChannelActionsView(discord.ui.View):
     def __init__(self, channel_id, owner_id):
@@ -430,39 +426,80 @@ class ChannelActionsView(discord.ui.View):
 
     @discord.ui.button(label="✏️ Edit Channel", style=discord.ButtonStyle.secondary)
     async def edit_channel(self, interaction, button):
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("❌ Only the channel owner can edit it!", ephemeral=True)
-            return
+        await interaction.response.send_message("Edit channel feature coming soon!", ephemeral=True)
 
-        embed = discord.Embed(
-            title="✏️ Edit Channel",
-            description="What would you like to edit?",
-            color=0x0099ff
-        )
-        view = EditChannelView(self.channel_id, self.owner_id)
+    @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary)
+    async def list_channels(self, interaction, button):
+        view = ListChannelsView(interaction.user.id)
+        await view.send_channel_list(interaction)
+
+class ListChannelsView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    @discord.ui.button(label="Close", style=discord.ButtonStyle.red)
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.message.delete()
+
+    async def send_channel_list(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        view = discord.ui.View(timeout=120)
+        embed = discord.Embed(title="Active Voice Channels", color=0x00ff00)
+
+        for channel_id, info in temp_channels.items():
+            channel = guild.get_channel(channel_id)
+            if not channel:
+                continue
+            owner = guild.get_member(info["owner_id"])
+            if not owner:
+                continue
+
+            embed.add_field(name=channel.name, value=f"Owner: {owner.mention}", inline=False)
+
+            if info["request_only"]:
+                button = discord.ui.Button(label=f"Request to Join {channel.name}", style=discord.ButtonStyle.blurple)
+                async def request_callback(interact, cid=channel_id, owner_id=info["owner_id"]):
+                    if interact.user.id == owner_id:
+                        await interact.response.send_message("You are the owner of this channel!", ephemeral=True)
+                        return
+                    channel_info = temp_channels.get(cid)
+                    if not channel_info:
+                        await interact.response.send_message("Channel info not found!", ephemeral=True)
+                        return
+                    if interact.user.id in channel_info["pending_requests"]:
+                        await interact.response.send_message("You already have a pending request!", ephemeral=True)
+                        return
+                    channel_info["pending_requests"].append(interact.user.id)
+                    save_data()
+                    owner_member = interact.guild.get_member(owner_id)
+                    if owner_member:
+                        await owner_member.send(f"{interact.user.mention} wants to join your voice channel!")
+                        await interact.response.send_message("Request sent to the channel owner!", ephemeral=True)
+                    else:
+                        await interact.response.send_message("Channel owner not found!", ephemeral=True)
+                button.callback = request_callback
+            else:
+                button = discord.ui.Button(label=f"Join {channel.name}", style=discord.ButtonStyle.green)
+                async def join_callback(interact, ch=channel):
+                    if interact.user.voice and interact.user.voice.channel == ch:
+                        await interact.response.send_message("You are already in this channel!", ephemeral=True)
+                        return
+                    try:
+                        await interact.user.move_to(ch)
+                        await interact.response.send_message(f"Moved you to {ch.name}!", ephemeral=True)
+                    except Exception:
+                        await interact.response.send_message(f"Could not move you to {ch.name}. Please join manually.", ephemeral=True)
+                button.callback = join_callback
+
+            view.add_item(button)
+
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    @discord.ui.button(label="👥 Manage Users", style=discord.ButtonStyle.secondary)
-    async def manage_users(self, interaction, button):
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("❌ Only the channel owner can manage users!", ephemeral=True)
-            return
-
-        channel = interaction.guild.get_channel(self.channel_id)
-        if not channel:
-            await interaction.response.send_message("❌ Your voice channel was not found!", ephemeral=True)
-            return
-
-        members = [m for m in channel.members if m.id != self.owner_id]
-        if not members:
-            await interaction.response.send_message("ℹ️ No other users in your voice channel.", ephemeral=True)
-            return
-
-        view = ManageUsersView(self.channel_id, self.owner_id, members)
-        embed = discord.Embed(title="Manage Users", description="Select a user to kick or block/unblock.", color=0x00ff00)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-# ... (rest of your classes and commands remain unchanged, including ManageUsersView, UserActionView, EditChannelView, ApprovalView, ListChannelsView, !echonetsetup, !help, etc.)
+# --- Commands ---
 
 @bot.command(name="voice")
 async def voice_command(ctx):
@@ -478,7 +515,7 @@ async def voice_command(ctx):
         await ctx.send("❌ The saved menu text channel no longer exists. Please ask an admin to run `!echonetsetup` again.")
         return
 
-    # Clean up all non-main-menu messages in the menu text channel
+    # Purge all messages except the main menu
     await purge_menu_text_channel(menu_text_channel)
 
     # Check if the main menu is present, if not, post it
@@ -488,7 +525,18 @@ async def voice_command(ctx):
             found_main_menu = True
             break
     if not found_main_menu:
-        await post_main_menu(menu_text_channel)
+        embed = discord.Embed(
+            title="🎤 Voice Channel Creator",
+            description="Create your own temporary voice channel!",
+            color=0x00ff00
+        )
+        embed.add_field(
+            name="Features",
+            value="• Custom duration\n• Access control\n• Channel management",
+            inline=False
+        )
+        view = MainMenu(None, menu_text_channel)
+        await menu_text_channel.send(f"{MAIN_MENU_TAG}", embed=embed, view=view)
         await ctx.send(f"✅ Main menu posted in <#{menu_text_channel.id}>.")
     else:
         await ctx.send(f"ℹ️ Main menu is already present in <#{menu_text_channel.id}>.")
@@ -501,43 +549,44 @@ async def echonetsetup_command(ctx):
 
     guild = ctx.guild
 
-    # Step 1: Ask for the voice channel category name and create it if needed
-    await ctx.send("Please type the name for the new category where all voice channels will be created:")
-    try:
-        cat_msg = await bot.wait_for("message", check=check_author, timeout=60)
-        category_name = cat_msg.content.strip()
-        category = discord.utils.get(guild.categories, name=category_name)
-        if not category:
-            category = await guild.create_category(category_name)
-            await ctx.send(f"✅ Category **{category_name}** created.")
-        else:
-            await ctx.send(f"ℹ️ Category **{category_name}** already exists, using it.")
-    except asyncio.TimeoutError:
-        await ctx.send("❌ Timed out. Please try again.")
+    # Step 1: Pick category for new voice channels
+    categories = [c for c in guild.categories]
+    if not categories:
+        await ctx.send("❌ No categories found. Please create a category first.")
         return
 
-    # Step 2: Ensure EchoNet Menu category exists
-    menu_category_name = "EchoNet Menu"
-    menu_category = discord.utils.get(guild.categories, name=menu_category_name)
-    if not menu_category:
-        menu_category = await guild.create_category(menu_category_name)
-        await ctx.send(f"✅ Menu category **{menu_category_name}** created.")
-    else:
-        await ctx.send(f"ℹ️ Menu category **{menu_category_name}** already exists, using it.")
+    category_list = "\n".join(f"{i+1}. {c.name}" for i, c in enumerate(categories))
+    await ctx.send(f"Please type the number of the category to use for new voice channels:\n{category_list}")
 
-    # Step 3: Ask for the menu text channel name and create it under EchoNet Menu
-    await ctx.send(f"Please type the name for the new text channel where the menu will be posted (it will be created under **{menu_category_name}**):")
+    try:
+        cat_msg = await bot.wait_for("message", check=check_author, timeout=60)
+        cat_idx = int(cat_msg.content.strip()) - 1
+        if cat_idx < 0 or cat_idx >= len(categories):
+            await ctx.send("❌ Invalid selection.")
+            return
+        category = categories[cat_idx]
+    except (ValueError, asyncio.TimeoutError):
+        await ctx.send("❌ Invalid or timed out. Please try again.")
+        return
+
+    # Step 2: Pick text channel for menu
+    text_channels = [ch for ch in guild.text_channels]
+    if not text_channels:
+        await ctx.send("❌ No text channels found. Please create one first.")
+        return
+
+    text_list = "\n".join(f"{i+1}. {ch.name}" for i, ch in enumerate(text_channels))
+    await ctx.send(f"Please type the number of the text channel to use for the menu:\n{text_list}")
+
     try:
         txt_msg = await bot.wait_for("message", check=check_author, timeout=60)
-        text_channel_name = txt_msg.content.strip()
-        text_channel = discord.utils.get(menu_category.text_channels, name=text_channel_name)
-        if not text_channel:
-            text_channel = await guild.create_text_channel(text_channel_name, category=menu_category)
-            await ctx.send(f"✅ Text channel **{text_channel_name}** created under **{menu_category_name}**.")
-        else:
-            await ctx.send(f"ℹ️ Text channel **{text_channel_name}** already exists in **{menu_category_name}**, using it.")
-    except asyncio.TimeoutError:
-        await ctx.send("❌ Timed out. Please try again.")
+        txt_idx = int(txt_msg.content.strip()) - 1
+        if txt_idx < 0 or txt_idx >= len(text_channels):
+            await ctx.send("❌ Invalid selection.")
+            return
+        text_channel = text_channels[txt_idx]
+    except (ValueError, asyncio.TimeoutError):
+        await ctx.send("❌ Invalid or timed out. Please try again.")
         return
 
     # Save settings
@@ -547,7 +596,7 @@ async def echonetsetup_command(ctx):
         "text_channel_id": text_channel.id
     }
     save_settings(settings)
-    await ctx.send(f"✅ Setup complete! New voice channels will be created in **{category.name}**, and the menu will be posted in **{text_channel.name}** under **{menu_category.name}**.")
+    await ctx.send(f"✅ Setup complete! New voice channels will be created in **{category.name}**, and the menu will be posted in **{text_channel.name}**.")
 
 @bot.command(name="help")
 async def help_command(ctx):
