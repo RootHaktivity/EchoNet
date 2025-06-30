@@ -64,132 +64,6 @@ def save_data():
     with open("channels.json", "w") as f:
         json.dump(data, f)
 
-async def check_permissions():
-    """Check bot permissions in all configured guilds and warn if missing"""
-    settings = load_settings()
-    permission_issues = []
-    
-    for guild in bot.guilds:
-        guild_id = str(guild.id)
-        if guild_id not in settings:
-            continue
-            
-        guild_issues = []
-        
-        # Check custom voice category permissions
-        category_id = settings[guild_id].get("category_id")
-        if category_id:
-            category = guild.get_channel(category_id)
-            if category:
-                perms = category.permissions_for(guild.me)
-                missing_perms = []
-                if not perms.manage_channels:
-                    missing_perms.append("Manage Channels")
-                if not perms.view_channel:
-                    missing_perms.append("View Channel")
-                if not perms.connect:
-                    missing_perms.append("Connect")
-                    
-                if missing_perms:
-                    guild_issues.append(f"Category '{category.name}': Missing {', '.join(missing_perms)}")
-            else:
-                guild_issues.append(f"Category with ID {category_id} not found")
-        
-        # Check menu text channel permissions
-        text_channel_id = settings[guild_id].get("text_channel_id")
-        if text_channel_id:
-            text_channel = guild.get_channel(text_channel_id)
-            if text_channel:
-                perms = text_channel.permissions_for(guild.me)
-                missing_perms = []
-                if not perms.view_channel:
-                    missing_perms.append("View Channel")
-                if not perms.send_messages:
-                    missing_perms.append("Send Messages")
-                if not perms.manage_messages:
-                    missing_perms.append("Manage Messages")
-                if not perms.embed_links:
-                    missing_perms.append("Embed Links")
-                if not perms.read_message_history:
-                    missing_perms.append("Read Message History")
-                    
-                if missing_perms:
-                    guild_issues.append(f"Text Channel '{text_channel.name}': Missing {', '.join(missing_perms)}")
-            else:
-                guild_issues.append(f"Text Channel with ID {text_channel_id} not found")
-        
-        if guild_issues:
-            permission_issues.append(f"**{guild.name}**:\n" + "\n".join(f"  • {issue}" for issue in guild_issues))
-    
-    return permission_issues
-
-async def notify_permission_issues(permission_issues):
-    """Notify about permission issues via console and DM to server owners"""
-    if not permission_issues:
-        print("✅ All permissions are correctly configured!")
-        return
-    
-    print("⚠️ PERMISSION ISSUES DETECTED:")
-    for issue in permission_issues:
-        print(f"  {issue}")
-    
-    # Try to DM server owners about permission issues
-    for guild in bot.guilds:
-        guild_id = str(guild.id)
-        settings = load_settings()
-        if guild_id in settings:
-            # Check if this guild has issues
-            guild_has_issues = any(guild.name in issue for issue in permission_issues)
-            if guild_has_issues:
-                try:
-                    owner = guild.owner
-                    if owner:
-                        embed = discord.Embed(
-                            title="⚠️ EchoNet Bot Permission Issues",
-                            description=f"I'm missing some permissions in **{guild.name}** that are needed for proper functionality.",
-                            color=0xff9900
-                        )
-                        
-                        # Find issues for this specific guild
-                        guild_specific_issues = [issue for issue in permission_issues if guild.name in issue]
-                        if guild_specific_issues:
-                            embed.add_field(
-                                name="Issues Found:",
-                                value=guild_specific_issues[0].replace(f"**{guild.name}**:\n", ""),
-                                inline=False
-                            )
-                        
-                        embed.add_field(
-                            name="How to Fix:",
-                            value="1. Go to Server Settings → Roles\n2. Find my role and move it to the top\n3. Ensure I have the missing permissions listed above\n4. Check both category and channel permissions",
-                            inline=False
-                        )
-                        
-                        await owner.send(embed=embed)
-                        print(f"📧 Sent permission warning to {owner} in {guild.name}")
-                except Exception as e:
-                    print(f"❌ Could not DM owner of {guild.name}: {e}")
-
-async def check_permissions_for_action(guild, category=None, text_channel=None):
-    """Check permissions before performing an action and return helpful error message if missing"""
-    issues = []
-    
-    if category:
-        perms = category.permissions_for(guild.me)
-        if not perms.manage_channels:
-            issues.append(f"I need 'Manage Channels' permission in the **{category.name}** category")
-        if not perms.view_channel:
-            issues.append(f"I need 'View Channel' permission in the **{category.name}** category")
-    
-    if text_channel:
-        perms = text_channel.permissions_for(guild.me)
-        if not perms.send_messages:
-            issues.append(f"I need 'Send Messages' permission in **{text_channel.name}**")
-        if not perms.manage_messages:
-            issues.append(f"I need 'Manage Messages' permission in **{text_channel.name}**")
-    
-    return issues
-
 # --- Persistent Views ---
 
 class ApproveDenyView(discord.ui.View):
@@ -215,12 +89,6 @@ class ApproveDenyView(discord.ui.View):
         
         if not channel or not requester:
             await interaction.response.send_message("❌ Could not find channel or user.")
-            return
-        
-        # Check permissions before attempting to edit
-        perms = channel.permissions_for(guild.me)
-        if not perms.manage_channels:
-            await interaction.response.send_message("❌ I don't have 'Manage Channels' permission for this voice channel. Please ask an admin to check my permissions.")
             return
             
         try:
@@ -334,11 +202,6 @@ async def on_ready():
     bot.add_view(MainMenu())
     bot.add_view(ApproveDenyView())
     print("🔄 Background tasks started")
-    
-    # Check permissions and notify about issues
-    print("🔍 Checking permissions...")
-    permission_issues = await check_permissions()
-    await notify_permission_issues(permission_issues)
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -349,12 +212,6 @@ async def on_command_error(ctx, error):
 # --- Purge helper ---
 
 async def purge_menu_text_channel(menu_text_channel):
-    # Check permissions before attempting to purge
-    perms = menu_text_channel.permissions_for(menu_text_channel.guild.me)
-    if not perms.manage_messages:
-        print(f"⚠️ Cannot purge {menu_text_channel.name} - missing 'Manage Messages' permission")
-        return
-        
     async for msg in menu_text_channel.history(limit=100):
         # Only keep the main menu message (by content tag)
         if not (msg.author == menu_text_channel.guild.me and msg.content.startswith(MAIN_MENU_TAG)):
@@ -364,12 +221,6 @@ async def purge_menu_text_channel(menu_text_channel):
                 pass
 
 async def ensure_main_menu(menu_text_channel):
-    # Check permissions before attempting to send messages
-    perms = menu_text_channel.permissions_for(menu_text_channel.guild.me)
-    if not perms.send_messages:
-        print(f"⚠️ Cannot send main menu to {menu_text_channel.name} - missing 'Send Messages' permission")
-        return None
-        
     # Check if the main menu is present, if not, post it
     found_main_menu = None
     async for msg in menu_text_channel.history(limit=20):
@@ -428,15 +279,6 @@ class MainMenu(discord.ui.View):
         if not category or not text_channel:
             await interaction.response.send_message(
                 "❌ The saved category or text channel no longer exists. Please ask an admin to run `!echonetsetup` again.",
-                ephemeral=True
-            )
-            return
-
-        # Check permissions before proceeding
-        permission_issues = await check_permissions_for_action(interaction.guild, category=category, text_channel=text_channel)
-        if permission_issues:
-            await interaction.response.send_message(
-                f"❌ Permission issues detected:\n" + "\n".join(f"• {issue}" for issue in permission_issues),
                 ephemeral=True
             )
             return
@@ -636,12 +478,6 @@ class AccessTypeView(discord.ui.View):
             await interaction.followup.send("❌ No category set. Please ask an admin to run `!echonetsetup`.", ephemeral=True)
             return
 
-        # Check permissions before creating channel
-        perms = category.permissions_for(guild.me)
-        if not perms.manage_channels:
-            await interaction.followup.send("❌ I don't have 'Manage Channels' permission in the category. Please ask an admin to check my permissions.", ephemeral=True)
-            return
-
         if request_only:
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(connect=False, view_channel=True),
@@ -784,12 +620,6 @@ class EditChannelView(discord.ui.View):
 
             channel = interaction.guild.get_channel(self.channel_id)
             if channel:
-                # Check permissions before editing
-                perms = channel.permissions_for(interaction.guild.me)
-                if not perms.manage_channels:
-                    await interaction.followup.send("❌ I don't have 'Manage Channels' permission for this channel.", ephemeral=True)
-                    return
-                    
                 await channel.edit(name=new_name, reason="Renamed by owner")
                 await interaction.followup.send(f"✅ Channel renamed to **{new_name}**!", ephemeral=True)
             else:
@@ -836,12 +666,6 @@ class EditChannelView(discord.ui.View):
         channel = interaction.guild.get_channel(self.channel_id)
         if not channel:
             await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
-            return
-
-        # Check permissions before editing
-        perms = channel.permissions_for(interaction.guild.me)
-        if not perms.manage_channels:
-            await interaction.response.send_message("❌ I don't have 'Manage Channels' permission for this channel.", ephemeral=True)
             return
 
         guild = interaction.guild
@@ -921,12 +745,6 @@ class EditChannelView(discord.ui.View):
                 await interaction.followup.send("❌ Channel not found!", ephemeral=True)
                 return
 
-            # Check permissions before editing
-            perms = channel.permissions_for(interaction.guild.me)
-            if not perms.manage_channels:
-                await interaction.followup.send("❌ I don't have 'Manage Channels' permission for this channel.", ephemeral=True)
-                return
-
             # Update permissions
             overwrites = channel.overwrites
             old_owner = interaction.guild.get_member(self.owner_id)
@@ -965,12 +783,6 @@ class EditChannelView(discord.ui.View):
 
                 channel = interaction.guild.get_channel(self.channel_id)
                 if channel:
-                    # Check permissions before editing
-                    perms = channel.permissions_for(interaction.guild.me)
-                    if not perms.manage_channels:
-                        await interaction.followup.send("❌ I don't have 'Manage Channels' permission for this channel.", ephemeral=True)
-                        return
-                        
                     await channel.edit(user_limit=limit, reason="User limit changed by owner")
                     limit_text = "unlimited" if limit == 0 else str(limit)
                     await interaction.followup.send(f"✅ User limit changed to **{limit_text}**!", ephemeral=True)
@@ -1024,12 +836,6 @@ class BlockedUsersView(discord.ui.View):
 
             channel = interaction.guild.get_channel(self.channel_id)
             if channel:
-                # Check permissions before editing
-                perms = channel.permissions_for(interaction.guild.me)
-                if not perms.manage_channels:
-                    await interaction.followup.send("❌ I don't have 'Manage Channels' permission for this channel.", ephemeral=True)
-                    return
-                    
                 overwrites = channel.overwrites
                 overwrites[user_to_block] = discord.PermissionOverwrite(connect=False, view_channel=True)
                 await channel.edit(overwrites=overwrites, reason="User blocked by owner")
@@ -1070,12 +876,6 @@ class BlockedUsersView(discord.ui.View):
 
             channel = interaction.guild.get_channel(self.channel_id)
             if channel:
-                # Check permissions before editing
-                perms = channel.permissions_for(interaction.guild.me)
-                if not perms.manage_channels:
-                    await interaction.followup.send("❌ I don't have 'Manage Channels' permission for this channel.", ephemeral=True)
-                    return
-                    
                 overwrites = channel.overwrites
                 if user_to_unblock in overwrites:
                     del overwrites[user_to_unblock]
@@ -1206,12 +1006,6 @@ async def voice_command(ctx):
         await ctx.send("❌ The saved menu text channel no longer exists. Please ask an admin to run `!echonetsetup` again.")
         return
 
-    # Check permissions before proceeding
-    permission_issues = await check_permissions_for_action(ctx.guild, text_channel=menu_text_channel)
-    if permission_issues:
-        await ctx.send(f"❌ Permission issues detected:\n" + "\n".join(f"• {issue}" for issue in permission_issues))
-        return
-
     # Purge all messages except the main menu
     await purge_menu_text_channel(menu_text_channel)
 
@@ -1276,38 +1070,6 @@ async def echonetsetup_command(ctx):
     save_settings(settings)
     await ctx.send(f"✅ Setup complete! New voice channels will be created in **{category.name}**, and the menu will be posted in **{text_channel.name}**.")
 
-@bot.command(name="checkperms")
-@commands.has_permissions(manage_channels=True)
-async def checkperms_command(ctx):
-    """Manual command to check bot permissions"""
-    await ctx.send("🔍 Checking permissions...")
-    permission_issues = await check_permissions()
-    
-    if not permission_issues:
-        await ctx.send("✅ All permissions are correctly configured!")
-    else:
-        embed = discord.Embed(
-            title="⚠️ Permission Issues Detected",
-            description="The following issues were found:",
-            color=0xff9900
-        )
-        
-        for i, issue in enumerate(permission_issues[:10]):  # Limit to 10 to avoid embed limits
-            embed.add_field(
-                name=f"Issue {i+1}",
-                value=issue,
-                inline=False
-            )
-        
-        if len(permission_issues) > 10:
-            embed.add_field(
-                name="Note",
-                value=f"... and {len(permission_issues) - 10} more issues. Check console for full details.",
-                inline=False
-            )
-        
-        await ctx.send(embed=embed)
-
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(
@@ -1317,5 +1079,7 @@ async def help_command(ctx):
     )
     embed.add_field(name="!voice", value="Show the main menu in the configured text channel", inline=False)
     embed.add_field(name="!echonetsetup", value="Set the default category and menu text channel (admin only)", inline=False)
-    embed.add_field(name="!checkperms", value="Check bot permissions (admin only)", inline=False)
-    embed.add_field(name="!help
+    embed.add_field(name="!help", value="Show this help message", inline=False)
+    await ctx.send(embed=embed)
+
+bot.run(os.getenv("BOT_TOKEN"))
