@@ -426,12 +426,321 @@ class ChannelActionsView(discord.ui.View):
 
     @discord.ui.button(label="✏️ Edit Channel", style=discord.ButtonStyle.secondary)
     async def edit_channel(self, interaction, button):
-        await interaction.response.send_message("Edit channel feature coming soon!", ephemeral=True)
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("❌ Only the channel owner can edit it!", ephemeral=True)
+            return
+
+        channel = interaction.guild.get_channel(self.channel_id)
+        if not channel:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="✏️ Edit Channel Options",
+            description=f"What would you like to edit for **{channel.name}**?",
+            color=0x0099ff
+        )
+        view = EditChannelView(self.channel_id, self.owner_id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary)
     async def list_channels(self, interaction, button):
         view = ListChannelsView(interaction.user.id)
         await view.send_channel_list(interaction)
+
+class EditChannelView(discord.ui.View):
+    def __init__(self, channel_id, owner_id):
+        super().__init__(timeout=120)
+        self.channel_id = channel_id
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    @discord.ui.button(label="📝 Rename Channel", style=discord.ButtonStyle.primary)
+    async def rename_channel(self, interaction, button):
+        await interaction.response.send_message("Please type the new name for your channel (1-100 characters):", ephemeral=True)
+
+        def check(m):
+            return m.author.id == self.owner_id and m.channel == interaction.channel
+
+        try:
+            msg = await bot.wait_for("message", check=check, timeout=60)
+            new_name = msg.content.strip()
+            if not (1 <= len(new_name) <= 100):
+                await interaction.followup.send("❌ Channel name must be between 1 and 100 characters!", ephemeral=True)
+                return
+
+            channel = interaction.guild.get_channel(self.channel_id)
+            if channel:
+                await channel.edit(name=new_name, reason="Renamed by owner")
+                await interaction.followup.send(f"✅ Channel renamed to **{new_name}**!", ephemeral=True)
+            else:
+                await interaction.followup.send("❌ Channel not found!", ephemeral=True)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
+
+    @discord.ui.button(label="⏰ Change Duration", style=discord.ButtonStyle.primary)
+    async def change_duration(self, interaction, button):
+        await interaction.response.send_message("Please type the new duration in days (1-60 max):", ephemeral=True)
+
+        def check(m):
+            return m.author.id == self.owner_id and m.channel == interaction.channel
+
+        try:
+            msg = await bot.wait_for("message", check=check, timeout=60)
+            try:
+                days = int(msg.content)
+                if days < 1 or days > 60:
+                    await interaction.followup.send("❌ Please enter a number between 1 and 60 days!", ephemeral=True)
+                    return
+
+                new_expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+                if self.channel_id in temp_channels:
+                    temp_channels[self.channel_id]["expires_at"] = new_expires_at
+                    save_data()
+                    await interaction.followup.send(f"✅ Channel duration changed to {days} day(s)!", ephemeral=True)
+                else:
+                    await interaction.followup.send("❌ Channel info not found!", ephemeral=True)
+            except ValueError:
+                await interaction.followup.send("❌ Please enter a valid number!", ephemeral=True)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
+
+    @discord.ui.button(label="🔐 Change Access Type", style=discord.ButtonStyle.primary)
+    async def change_access_type(self, interaction, button):
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel info not found!", ephemeral=True)
+            return
+
+        current_request_only = temp_channels[self.channel_id]["request_only"]
+        new_request_only = not current_request_only
+        
+        channel = interaction.guild.get_channel(self.channel_id)
+        if not channel:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        user = interaction.user
+
+        if new_request_only:
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(connect=False, view_channel=True),
+                user: discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True)
+            }
+            access_type = "🔒 Request Only"
+        else:
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True),
+                user: discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True)
+            }
+            access_type = "🌐 Open"
+
+        bot_member = guild.me
+        overwrites[bot_member] = discord.PermissionOverwrite(manage_channels=True, view_channel=True, connect=True)
+
+        await channel.edit(overwrites=overwrites, reason="Access type changed by owner")
+        temp_channels[self.channel_id]["request_only"] = new_request_only
+        save_data()
+
+        await interaction.response.send_message(f"✅ Channel access changed to **{access_type}**!", ephemeral=True)
+
+    @discord.ui.button(label="🚫 Manage Blocked Users", style=discord.ButtonStyle.secondary)
+    async def manage_blocked_users(self, interaction, button):
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel info not found!", ephemeral=True)
+            return
+
+        blocked_users = temp_channels[self.channel_id]["blocked_users"]
+        
+        embed = discord.Embed(
+            title="🚫 Blocked Users Management",
+            description="Choose an action:",
+            color=0xff0000
+        )
+        
+        if blocked_users:
+            blocked_mentions = []
+            for user_id in blocked_users:
+                user = interaction.guild.get_member(user_id)
+                if user:
+                    blocked_mentions.append(user.mention)
+            if blocked_mentions:
+                embed.add_field(name="Currently Blocked", value="\n".join(blocked_mentions), inline=False)
+
+        view = BlockedUsersView(self.channel_id, self.owner_id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="👑 Transfer Ownership", style=discord.ButtonStyle.secondary)
+    async def transfer_ownership(self, interaction, button):
+        await interaction.response.send_message("Please mention the user you want to transfer ownership to:", ephemeral=True)
+
+        def check(m):
+            return m.author.id == self.owner_id and m.channel == interaction.channel and m.mentions
+
+        try:
+            msg = await bot.wait_for("message", check=check, timeout=60)
+            new_owner = msg.mentions[0]
+            
+            if new_owner.id == self.owner_id:
+                await interaction.followup.send("❌ You're already the owner!", ephemeral=True)
+                return
+
+            if new_owner.bot:
+                await interaction.followup.send("❌ Cannot transfer ownership to a bot!", ephemeral=True)
+                return
+
+            channel = interaction.guild.get_channel(self.channel_id)
+            if not channel:
+                await interaction.followup.send("❌ Channel not found!", ephemeral=True)
+                return
+
+            # Update permissions
+            overwrites = channel.overwrites
+            old_owner = interaction.guild.get_member(self.owner_id)
+            if old_owner:
+                overwrites[old_owner] = discord.PermissionOverwrite(connect=True, view_channel=True)
+            overwrites[new_owner] = discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True)
+            
+            await channel.edit(overwrites=overwrites, reason="Ownership transferred")
+            
+            if self.channel_id in temp_channels:
+                temp_channels[self.channel_id]["owner_id"] = new_owner.id
+                save_data()
+
+            await interaction.followup.send(f"✅ Channel ownership transferred to {new_owner.mention}!", ephemeral=True)
+            try:
+                await new_owner.send(f"🎉 You are now the owner of voice channel **{channel.name}**!")
+            except:
+                pass
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
+
+    @discord.ui.button(label="👥 Change User Limit", style=discord.ButtonStyle.secondary)
+    async def change_user_limit(self, interaction, button):
+        await interaction.response.send_message("Please type the new user limit (0 for unlimited, max 99):", ephemeral=True)
+
+        def check(m):
+            return m.author.id == self.owner_id and m.channel == interaction.channel
+
+        try:
+            msg = await bot.wait_for("message", check=check, timeout=60)
+            try:
+                limit = int(msg.content)
+                if limit < 0 or limit > 99:
+                    await interaction.followup.send("❌ Please enter a number between 0 and 99!", ephemeral=True)
+                    return
+
+                channel = interaction.guild.get_channel(self.channel_id)
+                if channel:
+                    await channel.edit(user_limit=limit, reason="User limit changed by owner")
+                    limit_text = "unlimited" if limit == 0 else str(limit)
+                    await interaction.followup.send(f"✅ User limit changed to **{limit_text}**!", ephemeral=True)
+                else:
+                    await interaction.followup.send("❌ Channel not found!", ephemeral=True)
+            except ValueError:
+                await interaction.followup.send("❌ Please enter a valid number!", ephemeral=True)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
+
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
+    async def cancel(self, interaction, button):
+        await interaction.response.edit_message(content="❌ Edit cancelled.", embed=None, view=None)
+
+class BlockedUsersView(discord.ui.View):
+    def __init__(self, channel_id, owner_id):
+        super().__init__(timeout=120)
+        self.channel_id = channel_id
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    @discord.ui.button(label="➕ Block User", style=discord.ButtonStyle.red)
+    async def block_user(self, interaction, button):
+        await interaction.response.send_message("Please mention the user you want to block:", ephemeral=True)
+
+        def check(m):
+            return m.author.id == self.owner_id and m.channel == interaction.channel and m.mentions
+
+        try:
+            msg = await bot.wait_for("message", check=check, timeout=60)
+            user_to_block = msg.mentions[0]
+            
+            if user_to_block.id == self.owner_id:
+                await interaction.followup.send("❌ You cannot block yourself!", ephemeral=True)
+                return
+
+            if user_to_block.bot:
+                await interaction.followup.send("❌ Cannot block bots!", ephemeral=True)
+                return
+
+            if self.channel_id not in temp_channels:
+                await interaction.followup.send("❌ Channel info not found!", ephemeral=True)
+                return
+
+            blocked_users = temp_channels[self.channel_id]["blocked_users"]
+            if user_to_block.id in blocked_users:
+                await interaction.followup.send("❌ User is already blocked!", ephemeral=True)
+                return
+
+            channel = interaction.guild.get_channel(self.channel_id)
+            if channel:
+                overwrites = channel.overwrites
+                overwrites[user_to_block] = discord.PermissionOverwrite(connect=False, view_channel=True)
+                await channel.edit(overwrites=overwrites, reason="User blocked by owner")
+                
+                # Disconnect user if they're in the channel
+                if user_to_block.voice and user_to_block.voice.channel == channel:
+                    await user_to_block.move_to(None, reason="Blocked by channel owner")
+
+            blocked_users.append(user_to_block.id)
+            save_data()
+            await interaction.followup.send(f"✅ {user_to_block.mention} has been blocked!", ephemeral=True)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
+
+    @discord.ui.button(label="➖ Unblock User", style=discord.ButtonStyle.green)
+    async def unblock_user(self, interaction, button):
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel info not found!", ephemeral=True)
+            return
+
+        blocked_users = temp_channels[self.channel_id]["blocked_users"]
+        if not blocked_users:
+            await interaction.response.send_message("❌ No users are currently blocked!", ephemeral=True)
+            return
+
+        await interaction.response.send_message("Please mention the user you want to unblock:", ephemeral=True)
+
+        def check(m):
+            return m.author.id == self.owner_id and m.channel == interaction.channel and m.mentions
+
+        try:
+            msg = await bot.wait_for("message", check=check, timeout=60)
+            user_to_unblock = msg.mentions[0]
+            
+            if user_to_unblock.id not in blocked_users:
+                await interaction.followup.send("❌ User is not blocked!", ephemeral=True)
+                return
+
+            channel = interaction.guild.get_channel(self.channel_id)
+            if channel:
+                overwrites = channel.overwrites
+                if user_to_unblock in overwrites:
+                    del overwrites[user_to_unblock]
+                    await channel.edit(overwrites=overwrites, reason="User unblocked by owner")
+
+            blocked_users.remove(user_to_unblock.id)
+            save_data()
+            await interaction.followup.send(f"✅ {user_to_unblock.mention} has been unblocked!", ephemeral=True)
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
+
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction, button):
+        await interaction.response.edit_message(content="❌ Cancelled.", embed=None, view=None)
 
 class ListChannelsView(discord.ui.View):
     def __init__(self, user_id):
@@ -473,6 +782,9 @@ class ListChannelsView(discord.ui.View):
                     if interact.user.id in channel_info["pending_requests"]:
                         await interact.response.send_message("You already have a pending request!", ephemeral=True)
                         return
+                    if interact.user.id in channel_info["blocked_users"]:
+                        await interact.response.send_message("You are blocked from this channel!", ephemeral=True)
+                        return
                     channel_info["pending_requests"].append(interact.user.id)
                     save_data()
                     owner_member = interact.guild.get_member(owner_id)
@@ -484,9 +796,13 @@ class ListChannelsView(discord.ui.View):
                 button.callback = request_callback
             else:
                 button = discord.ui.Button(label=f"Join {channel.name}", style=discord.ButtonStyle.green)
-                async def join_callback(interact, ch=channel):
+                async def join_callback(interact, ch=channel, cid=channel_id):
                     if interact.user.voice and interact.user.voice.channel == ch:
                         await interact.response.send_message("You are already in this channel!", ephemeral=True)
+                        return
+                    channel_info = temp_channels.get(cid)
+                    if channel_info and interact.user.id in channel_info["blocked_users"]:
+                        await interact.response.send_message("You are blocked from this channel!", ephemeral=True)
                         return
                     try:
                         await interact.user.move_to(ch)
