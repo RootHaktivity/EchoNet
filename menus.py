@@ -70,8 +70,8 @@ async def delete_management_menu_and_restore_main(menu_text_channel, management_
 # --- UI Classes ---
 
 class ApproveDenyView(discord.ui.View):
-    def __init__(self, cid=None, requester_id=None, guild_id=None, timeout=300):
-        super().__init__(timeout=timeout)
+    def __init__(self, cid=None, requester_id=None, guild_id=None):
+        super().__init__(timeout=None)  # Persistent view
         self.cid = cid
         self.requester_id = requester_id
         self.guild_id = guild_id
