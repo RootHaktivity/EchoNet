@@ -72,25 +72,25 @@ class ApproveDenyView(discord.ui.View):
         global temp_channels
 
         if not self.cid or not self.requester_id or not self.guild_id:
-            await interaction.response.send_message("❌ Could not process approval - missing information.")
+            await interaction.response.send_message("❌ Could not process approval - missing information.", ephemeral=True)
             return
 
         guild = bot.get_guild(self.guild_id)
         if not guild:
-            await interaction.response.send_message("❌ Could not find the server.")
+            await interaction.response.send_message("❌ Could not find the server.", ephemeral=True)
             return
 
         channel = guild.get_channel(self.cid)
         requester = guild.get_member(self.requester_id)
 
         if not channel or not requester:
-            await interaction.response.send_message("❌ Could not find channel or user.")
+            await interaction.response.send_message("❌ Could not find channel or user.", ephemeral=True)
             return
 
         missing_perms = check_voice_channel_permissions(channel)
         if missing_perms:
             perm_error = format_permission_error(missing_perms, f"Channel {channel.name}")
-            await interaction.response.send_message(f"❌ Cannot approve request due to missing permissions:\n{perm_error}")
+            await interaction.response.send_message(f"❌ Cannot approve request due to missing permissions:\n{perm_error}", ephemeral=True)
             return
 
         try:
@@ -98,12 +98,12 @@ class ApproveDenyView(discord.ui.View):
             overwrites[requester] = discord.PermissionOverwrite(connect=True, view_channel=True)
             await channel.edit(overwrites=overwrites, reason="Approved join request")
 
-            if self.cid in temp_channels and self.requester_id in temp_channels[self.cid]["pending_requests"]:
+            if self.cid in temp_channels and self.requester_id in temp_channels[self.cid].get("pending_requests", []):
                 temp_channels[self.cid]["pending_requests"].remove(self.requester_id)
                 save_data()
 
             await interaction.response.send_message(
-                f"✅ You approved {requester.mention} to join **{channel.name}**."
+                f"✅ You approved {requester.mention} to join **{channel.name}**.", ephemeral=True
             )
 
             try:
@@ -112,9 +112,9 @@ class ApproveDenyView(discord.ui.View):
                 pass
 
         except discord.Forbidden:
-            await interaction.response.send_message("❌ I don't have permission to edit this channel. Please ensure I have the 'Manage Channels' permission in the category and channel.")
+            await interaction.response.send_message("❌ I don't have permission to edit this channel. Please ensure I have the 'Manage Channels' permission in the category and channel.", ephemeral=True)
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error processing approval: {str(e)}")
+            await interaction.response.send_message(f"❌ Error processing approval: {str(e)}", ephemeral=True)
 
     @discord.ui.button(label="Deny", style=discord.ButtonStyle.red, custom_id="deny_request")
     async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -122,29 +122,29 @@ class ApproveDenyView(discord.ui.View):
         global temp_channels
 
         if not self.cid or not self.requester_id or not self.guild_id:
-            await interaction.response.send_message("❌ Could not process denial - missing information.")
+            await interaction.response.send_message("❌ Could not process denial - missing information.", ephemeral=True)
             return
 
         guild = bot.get_guild(self.guild_id)
         if not guild:
-            await interaction.response.send_message("❌ Could not find the server.")
+            await interaction.response.send_message("❌ Could not find the server.", ephemeral=True)
             return
 
         channel = guild.get_channel(self.cid)
         requester = guild.get_member(self.requester_id)
 
         if not channel:
-            await interaction.response.send_message("❌ Could not find channel.")
+            await interaction.response.send_message("❌ Could not find channel.", ephemeral=True)
             return
 
         try:
-            if self.cid in temp_channels and self.requester_id in temp_channels[self.cid]["pending_requests"]:
+            if self.cid in temp_channels and self.requester_id in temp_channels[self.cid].get("pending_requests", []):
                 temp_channels[self.cid]["pending_requests"].remove(self.requester_id)
                 save_data()
 
             requester_name = requester.mention if requester else f"User ID {self.requester_id}"
             await interaction.response.send_message(
-                f"❌ You denied {requester_name}'s request to join **{channel.name}**."
+                f"❌ You denied {requester_name}'s request to join **{channel.name}**.", ephemeral=True
             )
 
             if requester:
@@ -154,7 +154,7 @@ class ApproveDenyView(discord.ui.View):
                     pass
 
         except Exception as e:
-            await interaction.response.send_message(f"❌ Error processing denial: {str(e)}")
+            await interaction.response.send_message(f"❌ Error processing denial: {str(e)}", ephemeral=True)
 
 class MainMenu(discord.ui.View):
     def __init__(self):
@@ -245,7 +245,7 @@ class MainMenu(discord.ui.View):
 
     @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary, emoji="📋", custom_id="mainmenu_list")
     async def list_channels(self, interaction, button):
-        view = ListChannelsView(interaction.user.id)
+        view = ListChannelsView(interaction.user.id, interaction.guild)
         await view.send_channel_list(interaction)
 
 class SelectChannelView(discord.ui.View):
@@ -661,19 +661,32 @@ class BlockedUsersView(discord.ui.View):
         view.add_item(select)
         await interaction.response.send_message("Select a user to unblock:", view=view, ephemeral=True)
 
-# --- Improved ListChannelsView and RequestJoinSelectView ---
+# --- Improved ListChannelsView and RequestJoinButton ---
 
 class ListChannelsView(discord.ui.View):
-    def __init__(self, user_id):
+    def __init__(self, user_id, guild):
         super().__init__(timeout=60)
         self.user_id = user_id
+        self.guild = guild
+
+        from main import temp_channels
+        global temp_channels
+
+        for cid, info in temp_channels.items():
+            if (
+                info.get("request_only")
+                and info["owner_id"] != self.user_id
+                and self.user_id not in info.get("pending_requests", [])
+            ):
+                channel = guild.get_channel(cid)
+                if channel:
+                    self.add_item(RequestJoinButton(cid, channel.name, info["owner_id"], self.user_id))
 
     async def send_channel_list(self, interaction: discord.Interaction):
         from main import temp_channels
         global temp_channels
 
         guild = interaction.guild
-        user = interaction.user
 
         if not temp_channels:
             await interaction.response.send_message("❌ There are no active voice channels.", ephemeral=True)
@@ -683,8 +696,6 @@ class ListChannelsView(discord.ui.View):
             title="Active Voice Channels",
             color=0x00ff00
         )
-
-        requestable_channels = []
 
         for cid, info in temp_channels.items():
             channel = guild.get_channel(cid)
@@ -703,68 +714,55 @@ class ListChannelsView(discord.ui.View):
                 value=f"Owner: {owner_name}\nAccess: {access}\nExpires: {expires_str}",
                 inline=False
             )
-            if (
-                info.get("request_only")
-                and info["owner_id"] != self.user_id
-                and self.user_id not in info.get("pending_requests", [])
-            ):
-                requestable_channels.append((cid, channel.name, owner_name))
 
-        view = None
-        if requestable_channels:
-            view = RequestJoinSelectView(self.user_id, requestable_channels)
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-        else:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=self, ephemeral=True)
 
-class RequestJoinSelectView(discord.ui.View):
-    def __init__(self, user_id, requestable_channels):
-        super().__init__(timeout=60)
-        self.user_id = user_id
-        self.requestable_channels = requestable_channels
+class RequestJoinButton(discord.ui.Button):
+    def __init__(self, channel_id, channel_name, owner_id, requester_id):
+        super().__init__(
+            label=f"Request to Join: {channel_name}",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"request_join_{channel_id}"
+        )
+        self.channel_id = channel_id
+        self.owner_id = owner_id
+        self.requester_id = requester_id
 
-        options = [
-            discord.SelectOption(
-                label=f"{name} (Owner: {owner})",
-                value=str(cid)
-            )
-            for cid, name, owner in requestable_channels[:25]
-        ]
-        select = discord.ui.Select(placeholder="Select a channel to request to join...", options=options)
-        select.callback = self.select_callback
-        self.add_item(select)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
-
-    async def select_callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction: discord.Interaction):
         from main import temp_channels, save_data
         global temp_channels
 
-        cid = int(interaction.data['values'][0])
-        info = temp_channels.get(cid)
+        info = temp_channels.get(self.channel_id)
         if not info:
             await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
             return
 
         if "pending_requests" not in info:
             info["pending_requests"] = []
-        if self.user_id in info["pending_requests"]:
+        if self.requester_id in info["pending_requests"]:
             await interaction.response.send_message("❌ You have already requested to join this channel.", ephemeral=True)
             return
 
-        info["pending_requests"].append(self.user_id)
+        info["pending_requests"].append(self.requester_id)
         save_data()
 
         await interaction.response.send_message("✅ Your request to join has been sent to the channel owner.", ephemeral=True)
 
-        owner = interaction.guild.get_member(info["owner_id"])
-        channel = interaction.guild.get_channel(cid)
+        owner = interaction.guild.get_member(self.owner_id)
+        channel = interaction.guild.get_channel(self.channel_id)
+        requester = interaction.user
         if owner and channel:
             try:
-                await owner.send(
-                    f"🔔 {interaction.user.mention} has requested to join your channel **{channel.name}** in **{interaction.guild.name}**.\n"
-                    f"Manage requests in the EchoNet menu."
+                embed = discord.Embed(
+                    title="Voice Channel Join Request",
+                    description=f"{requester.mention} has requested to join your channel **{channel.name}** in **{interaction.guild.name}**.",
+                    color=0x00ff00
                 )
+                view = ApproveDenyView(
+                    cid=self.channel_id,
+                    requester_id=self.requester_id,
+                    guild_id=interaction.guild.id
+                )
+                await owner.send(embed=embed, view=view)
             except:
                 pass
