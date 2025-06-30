@@ -307,15 +307,13 @@ class DurationView(discord.ui.View):
 
     @discord.ui.button(label="Custom", style=discord.ButtonStyle.gray)
     async def custom_duration(self, interaction, button):
-        from main import bot
-
         await interaction.response.send_message("Please type the number of days (1-60 max):", ephemeral=True)
 
         def check(m):
             return m.author.id == self.user_id and m.channel == self.channel
 
         try:
-            msg = await bot.wait_for("message", check=check, timeout=30)
+            msg = await interaction.client.wait_for("message", check=check, timeout=30)
             try:
                 days = int(msg.content)
                 if days < 1 or days > 60:
@@ -365,15 +363,13 @@ class AccessTypeView(discord.ui.View):
         await self.ask_channel_name(interaction, request_only=True)
 
     async def ask_channel_name(self, interaction, request_only):
-        from main import bot
-
         await interaction.response.send_message("Please type the name you want for your voice channel (1-100 characters):", ephemeral=True)
 
         def check(m):
             return m.author.id == self.user_id and m.channel == self.channel
 
         try:
-            msg = await bot.wait_for("message", check=check, timeout=60)
+            msg = await interaction.client.wait_for("message", check=check, timeout=60)
             channel_name = msg.content.strip()
             if not (1 <= len(channel_name) <= 100):
                 await interaction.followup.send("❌ Channel name must be between 1 and 100 characters!", ephemeral=True)
@@ -390,7 +386,6 @@ class AccessTypeView(discord.ui.View):
         guild = interaction.guild
         user = interaction.user
 
-        # Always fetch the latest category from settings
         settings = load_settings()
         guild_id = str(guild.id)
         if guild_id not in settings or "category_id" not in settings[guild_id]:
@@ -466,4 +461,6 @@ class AccessTypeView(discord.ui.View):
         )
         save_data()
 
-        bot.loop.create_task(delete_management_menu_and_restore_main(menu_text_channel, menu_message))
+        interaction.client.loop.create_task(delete_management_menu_and_restore_main(menu_text_channel, menu_message))
+
+# ... (rest of your code for ChannelActionsView, EditChannelView, BlockedUsersView, ListChannelsView remains unchanged)
