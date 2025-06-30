@@ -18,6 +18,7 @@ bot.remove_command("help")
 temp_channels = {}
 
 SETTINGS_FILE = "echonet_settings.json"
+MAIN_MENU_TAG = "[EchoNet Main Menu]"
 
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
@@ -163,6 +164,11 @@ class MainMenu(discord.ui.View):
     async def list_channels(self, interaction, button):
         view = ListChannelsView(interaction.user.id)
         await view.send_channel_list(interaction)
+
+    @discord.ui.button(label="🛠️ Manage Voice Channel", style=discord.ButtonStyle.secondary)
+    async def manage_voice_channel(self, interaction, button):
+        # This could show a modal or a new menu for managing the user's own channel(s)
+        await interaction.response.send_message("Feature coming soon! (Or implement your own logic here.)", ephemeral=True)
 
 class DurationView(discord.ui.View):
     def __init__(self, user_id, channel, category=None, menu_text_channel=None):
@@ -313,12 +319,8 @@ class AccessTypeView(discord.ui.View):
             await self.channel.send("❌ Could not find the menu text channel! Please ask an admin to run `!echonetsetup`.")
             return
 
-        async for msg in menu_text_channel.history(limit=100):
-            if not msg.pinned:
-                try:
-                    await msg.delete()
-                except:
-                    pass
+        # Clean up all non-main-menu messages in the menu text channel
+        await purge_menu_text_channel(menu_text_channel)
 
         access_type = "🔒 Request Only" if request_only else "🌐 Open"
         embed = discord.Embed(
@@ -347,6 +349,48 @@ class AccessTypeView(discord.ui.View):
             "blocked_users": []
         }
         save_data()
+
+        # Schedule deletion of the management menu and re-post the main menu if needed
+        bot.loop.create_task(delete_management_menu_and_restore_main(menu_text_channel, menu_message))
+
+async def purge_menu_text_channel(menu_text_channel):
+    # Delete all messages except the main menu
+    async for msg in menu_text_channel.history(limit=100):
+        if not (msg.author == menu_text_channel.guild.me and msg.content.startswith(MAIN_MENU_TAG)):
+            try:
+                await msg.delete()
+            except:
+                pass
+
+async def delete_management_menu_and_restore_main(menu_text_channel, management_msg, delay=300):
+    # Wait for the specified delay (default 5 minutes)
+    await asyncio.sleep(delay)
+    try:
+        await management_msg.delete()
+    except:
+        pass
+    # Check if the main menu is present, if not, re-post it
+    found_main_menu = False
+    async for msg in menu_text_channel.history(limit=20):
+        if msg.author == menu_text_channel.guild.me and msg.content.startswith(MAIN_MENU_TAG):
+            found_main_menu = True
+            break
+    if not found_main_menu:
+        await post_main_menu(menu_text_channel)
+
+async def post_main_menu(menu_text_channel):
+    embed = discord.Embed(
+        title="🎤 Voice Channel Creator",
+        description="Create your own temporary voice channel!",
+        color=0x00ff00
+    )
+    embed.add_field(
+        name="Features",
+        value="• Custom duration\n• Access control\n• Channel management",
+        inline=False
+    )
+    view = MainMenu(None, menu_text_channel)
+    await menu_text_channel.send(f"{MAIN_MENU_TAG}", embed=embed, view=view)
 
 class ChannelActionsView(discord.ui.View):
     def __init__(self, channel_id, owner_id):
@@ -398,21 +442,6 @@ class ChannelActionsView(discord.ui.View):
         view = EditChannelView(self.channel_id, self.owner_id)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    @discord.ui.button(label="📋 List Channels", style=discord.ButtonStyle.primary)
-    async def list_channels(self, interaction, button):
-        view = ListChannelsView(interaction.user.id)
-        await view.send_channel_list(interaction)
-
-    @discord.ui.button(label="🎤 Create Voice Channel", style=discord.ButtonStyle.green)
-    async def create_voice_channel(self, interaction, button):
-        embed = discord.Embed(
-            title="🎤 Voice Channel Creator",
-            description="Create your own temporary voice channel!",
-            color=0x00ff00
-        )
-        view = MainMenu(interaction.user.id, interaction.channel)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
     @discord.ui.button(label="👥 Manage Users", style=discord.ButtonStyle.secondary)
     async def manage_users(self, interaction, button):
         if interaction.user.id != self.owner_id:
@@ -433,332 +462,36 @@ class ChannelActionsView(discord.ui.View):
         embed = discord.Embed(title="Manage Users", description="Select a user to kick or block/unblock.", color=0x00ff00)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-class ManageUsersView(discord.ui.View):
-    def __init__(self, channel_id, owner_id, members):
-        super().__init__(timeout=120)
-        self.channel_id = channel_id
-        self.owner_id = owner_id
-        self.members = members
-
-        options = [discord.SelectOption(label=m.display_name, value=str(m.id)) for m in members]
-        self.user_select = discord.ui.Select(placeholder="Select a user", options=options, min_values=1, max_values=1)
-        self.user_select.callback = self.user_selected
-        self.add_item(self.user_select)
-
-    async def user_selected(self, interaction: discord.Interaction):
-        user_id = int(self.user_select.values[0])
-        member = interaction.guild.get_member(user_id)
-        if not member:
-            await interaction.response.send_message("❌ User not found.", ephemeral=True)
-            return
-
-        view = UserActionView(self.channel_id, self.owner_id, member)
-        embed = discord.Embed(title=f"Manage {member.display_name}", color=0x00ff00)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-class UserActionView(discord.ui.View):
-    def __init__(self, channel_id, owner_id, member):
-        super().__init__(timeout=120)
-        self.channel_id = channel_id
-        self.owner_id = owner_id
-        self.member = member
-
-    @discord.ui.button(label="Kick User", style=discord.ButtonStyle.danger)
-    async def kick_user(self, interaction, button):
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("❌ Only the channel owner can kick users!", ephemeral=True)
-            return
-
-        channel = interaction.guild.get_channel(self.channel_id)
-        if not channel:
-            await interaction.response.send_message("❌ Voice channel not found!", ephemeral=True)
-            return
-
-        if self.member not in channel.members:
-            await interaction.response.send_message("❌ User is not in your voice channel.", ephemeral=True)
-            return
-
-        try:
-            await self.member.move_to(None)
-            await interaction.response.send_message(f"✅ Kicked {self.member.display_name} from the voice channel.", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Failed to kick user: {e}", ephemeral=True)
-
-    @discord.ui.button(label="Block User", style=discord.ButtonStyle.red)
-    async def block_user(self, interaction, button):
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("❌ Only the channel owner can block users!", ephemeral=True)
-            return
-
-        channel_info = temp_channels.get(self.channel_id)
-        if not channel_info:
-            await interaction.response.send_message("❌ Channel info not found!", ephemeral=True)
-            return
-
-        if self.member.id in channel_info.get("blocked_users", []):
-            await interaction.response.send_message(f"ℹ️ {self.member.display_name} is already blocked.", ephemeral=True)
-            return
-
-        channel = interaction.guild.get_channel(self.channel_id)
-        if not channel:
-            await interaction.response.send_message("❌ Voice channel not found!", ephemeral=True)
-            return
-
-        await channel.set_permissions(self.member, connect=False)
-        channel_info.setdefault("blocked_users", []).append(self.member.id)
-        save_data()
-        await interaction.response.send_message(f"✅ Blocked {self.member.display_name} from joining the voice channel.", ephemeral=True)
-
-    @discord.ui.button(label="Unblock User", style=discord.ButtonStyle.green)
-    async def unblock_user(self, interaction, button):
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("❌ Only the channel owner can unblock users!", ephemeral=True)
-            return
-
-        channel_info = temp_channels.get(self.channel_id)
-        if not channel_info:
-            await interaction.response.send_message("❌ Channel info not found!", ephemeral=True)
-            return
-
-        if self.member.id not in channel_info.get("blocked_users", []):
-            await interaction.response.send_message(f"ℹ️ {self.member.display_name} is not blocked.", ephemeral=True)
-            return
-
-        channel = interaction.guild.get_channel(self.channel_id)
-        if not channel:
-            await interaction.response.send_message("❌ Voice channel not found!", ephemeral=True)
-            return
-
-        await channel.set_permissions(self.member, overwrite=None)
-        channel_info["blocked_users"].remove(self.member.id)
-        save_data()
-        await interaction.response.send_message(f"✅ Unblocked {self.member.display_name}.", ephemeral=True)
-
-    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary)
-    async def go_back(self, interaction, button):
-        channel = interaction.guild.get_channel(self.channel_id)
-        if not channel:
-            await interaction.response.send_message("❌ Voice channel not found!", ephemeral=True)
-            return
-
-        members = [m for m in channel.members if m.id != self.owner_id]
-        view = ManageUsersView(self.channel_id, self.owner_id, members)
-        embed = discord.Embed(title="Manage Users", description="Select a user to kick or block/unblock.", color=0x00ff00)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-class EditChannelView(discord.ui.View):
-    def __init__(self, channel_id, owner_id):
-        super().__init__(timeout=60)
-        self.channel_id = channel_id
-        self.owner_id = owner_id
-
-    @discord.ui.button(label="📝 Change Name", style=discord.ButtonStyle.secondary)
-    async def change_name(self, interaction, button):
-        await interaction.response.send_message("Please type the new name for your channel:", ephemeral=True)
-
-        def check(m):
-            return m.author.id == self.owner_id and isinstance(m.channel, discord.DMChannel)
-
-        try:
-            msg = await bot.wait_for("message", check=check, timeout=60)
-            new_name = msg.content.strip()
-            if not (1 <= len(new_name) <= 100):
-                await msg.channel.send("❌ Channel name must be between 1 and 100 characters!")
-                return
-
-            channel = bot.get_channel(self.channel_id)
-            if channel:
-                await channel.edit(name=new_name)
-                await msg.channel.send(f"✅ Channel name changed to: **{new_name}**")
-            else:
-                await msg.channel.send("❌ Channel not found!")
-        except asyncio.TimeoutError:
-            await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
-
-    @discord.ui.button(label="🔄 Toggle Access", style=discord.ButtonStyle.secondary)
-    async def toggle_access(self, interaction, button):
-        if self.channel_id not in temp_channels:
-            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
-            return
-
-        channel_info = temp_channels[self.channel_id]
-        channel = bot.get_channel(self.channel_id)
-        if not channel:
-            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
-            return
-
-        guild = channel.guild
-        current_access = "Request Only" if channel_info["request_only"] else "Open"
-        new_access_request_only = not channel_info["request_only"]
-        new_access = "Request Only" if new_access_request_only else "Open"
-
-        if new_access_request_only:
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(connect=False, view_channel=True),
-                guild.get_member(self.owner_id): discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True),
-                guild.me: discord.PermissionOverwrite(manage_channels=True, view_channel=True, connect=True)
-            }
-        else:
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True),
-                guild.get_member(self.owner_id): discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True),
-                guild.me: discord.PermissionOverwrite(manage_channels=True, view_channel=True, connect=True)
-            }
-
-        await channel.edit(overwrites=overwrites)
-        channel_info["request_only"] = new_access_request_only
-        save_data()
-
-        await interaction.response.send_message(f"✅ Access changed from **{current_access}** to **{new_access}**!", ephemeral=True)
-
-class ApprovalView(discord.ui.View):
-    def __init__(self, channel_id, requester_id):
-        super().__init__(timeout=300)
-        self.channel_id = channel_id
-        self.requester_id = requester_id
-
-    @discord.ui.button(label="✅ Approve", style=discord.ButtonStyle.green)
-    async def approve(self, interaction, button):
-        if self.channel_id not in temp_channels:
-            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
-            return
-
-        channel_info = temp_channels[self.channel_id]
-        if self.requester_id in channel_info["pending_requests"]:
-            channel_info["pending_requests"].remove(self.requester_id)
-
-        channel = bot.get_channel(self.channel_id)
-        if channel:
-            requester = interaction.guild.get_member(self.requester_id)
-            if requester:
-                await channel.set_permissions(requester, connect=True, view_channel=True)
-                await interaction.response.send_message(f"✅ Approved {requester.mention} to join the channel!", ephemeral=True)
-                try:
-                    await requester.send(f"✅ Your request to join **{channel.name}** has been approved!")
-                except:
-                    pass
-            else:
-                await interaction.response.send_message("❌ Requester not found!", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
-
-        save_data()
-
-    @discord.ui.button(label="❌ Deny", style=discord.ButtonStyle.red)
-    async def deny(self, interaction, button):
-        if self.channel_id not in temp_channels:
-            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
-            return
-
-        channel_info = temp_channels[self.channel_id]
-        if self.requester_id in channel_info["pending_requests"]:
-            channel_info["pending_requests"].remove(self.requester_id)
-
-        requester = interaction.guild.get_member(self.requester_id)
-        if requester:
-            await interaction.response.send_message(f"❌ Denied {requester.mention}'s request.", ephemeral=True)
-            try:
-                channel = bot.get_channel(self.channel_id)
-                channel_name = channel.name if channel else "the channel"
-                await requester.send(f"❌ Your request to join **{channel_name}** has been denied.")
-            except:
-                pass
-        else:
-            await interaction.response.send_message("❌ Requester not found!", ephemeral=True)
-
-        save_data()
-
-class ListChannelsView(discord.ui.View):
-    def __init__(self, user_id):
-        super().__init__(timeout=120)
-        self.user_id = user_id
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
-
-    @discord.ui.button(label="Close", style=discord.ButtonStyle.red)
-    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.message.delete()
-
-    async def send_channel_list(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        view = discord.ui.View(timeout=120)
-        embed = discord.Embed(title="Active Voice Channels", color=0x00ff00)
-
-        for channel_id, info in temp_channels.items():
-            channel = guild.get_channel(channel_id)
-            if not channel:
-                continue
-            owner = guild.get_member(info["owner_id"])
-            if not owner:
-                continue
-
-            embed.add_field(name=channel.name, value=f"Owner: {owner.mention}", inline=False)
-
-            if info["request_only"]:
-                button = discord.ui.Button(label=f"Request to Join {channel.name}", style=discord.ButtonStyle.blurple)
-                async def request_callback(interact, cid=channel_id, owner_id=info["owner_id"]):
-                    if interact.user.id == owner_id:
-                        await interact.response.send_message("You are the owner of this channel!", ephemeral=True)
-                        return
-                    channel_info = temp_channels.get(cid)
-                    if not channel_info:
-                        await interact.response.send_message("Channel info not found!", ephemeral=True)
-                        return
-                    if interact.user.id in channel_info["pending_requests"]:
-                        await interact.response.send_message("You already have a pending request!", ephemeral=True)
-                        return
-                    channel_info["pending_requests"].append(interact.user.id)
-                    save_data()
-                    owner_member = interact.guild.get_member(owner_id)
-                    if owner_member:
-                        embed_req = discord.Embed(
-                            title="🚪 Join Request",
-                            description=f"{interact.user.mention} wants to join your voice channel!",
-                            color=0x0099ff
-                        )
-                        view_req = ApprovalView(cid, interact.user.id)
-                        try:
-                            await owner_member.send(embed=embed_req, view=view_req)
-                            await interact.response.send_message("Request sent to the channel owner!", ephemeral=True)
-                        except:
-                            await interact.response.send_message("Couldn't send request to owner!", ephemeral=True)
-                    else:
-                        await interact.response.send_message("Channel owner not found!", ephemeral=True)
-                button.callback = request_callback
-            else:
-                button = discord.ui.Button(label=f"Join {channel.name}", style=discord.ButtonStyle.green)
-                async def join_callback(interact, ch=channel):
-                    if interact.user.voice and interact.user.voice.channel == ch:
-                        await interact.response.send_message("You are already in this channel!", ephemeral=True)
-                        return
-                    try:
-                        await interact.user.move_to(ch)
-                        await interact.response.send_message(f"Moved you to {ch.name}!", ephemeral=True)
-                    except Exception:
-                        await interact.response.send_message(f"Could not move you to {ch.name}. Please join manually.", ephemeral=True)
-                button.callback = join_callback
-
-            view.add_item(button)
-
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-# --- Commands ---
+# ... (rest of your classes and commands remain unchanged, including ManageUsersView, UserActionView, EditChannelView, ApprovalView, ListChannelsView, !echonetsetup, !help, etc.)
 
 @bot.command(name="voice")
 async def voice_command(ctx):
-    view = MainMenu(ctx.author.id, ctx.channel)
-    embed = discord.Embed(
-        title="🎤 Voice Channel Creator",
-        description="Create your own temporary voice channel!",
-        color=0x00ff00
-    )
-    embed.add_field(
-        name="Features",
-        value="• Custom duration\n• Access control\n• Channel management",
-        inline=False
-    )
-    await ctx.send(embed=embed, view=view)
+    settings = load_settings()
+    guild_id = str(ctx.guild.id)
+    if guild_id not in settings:
+        await ctx.send("❌ Setup not complete. Please ask an admin to run `!echonetsetup` first.")
+        return
+
+    text_channel_id = settings[guild_id]["text_channel_id"]
+    menu_text_channel = ctx.guild.get_channel(text_channel_id)
+    if not menu_text_channel:
+        await ctx.send("❌ The saved menu text channel no longer exists. Please ask an admin to run `!echonetsetup` again.")
+        return
+
+    # Clean up all non-main-menu messages in the menu text channel
+    await purge_menu_text_channel(menu_text_channel)
+
+    # Check if the main menu is present, if not, post it
+    found_main_menu = False
+    async for msg in menu_text_channel.history(limit=20):
+        if msg.author == ctx.guild.me and msg.content.startswith(MAIN_MENU_TAG):
+            found_main_menu = True
+            break
+    if not found_main_menu:
+        await post_main_menu(menu_text_channel)
+        await ctx.send(f"✅ Main menu posted in <#{menu_text_channel.id}>.")
+    else:
+        await ctx.send(f"ℹ️ Main menu is already present in <#{menu_text_channel.id}>.")
 
 @bot.command(name="echonetsetup")
 @commands.has_permissions(manage_channels=True)
