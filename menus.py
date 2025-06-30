@@ -466,3 +466,92 @@ class AccessTypeView(discord.ui.View):
         save_data()
 
         interaction.client.loop.create_task(delete_management_menu_and_restore_main(menu_text_channel, menu_message))
+        
+        async def create_channel(self, interaction, request_only, channel_name):
+    from main import bot, temp_channels, save_data  # Import here to avoid circular imports
+    from data import load_settings
+
+    expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=self.days)
+    guild = interaction.guild
+    user = interaction.user
+
+    # Always fetch the latest category from settings
+    settings = load_settings()
+    guild_id = str(guild.id)
+    if guild_id not in settings or "category_id" not in settings[guild_id]:
+        await interaction.followup.send("❌ No category set. Please ask an admin to run `!echonetsetup`.", ephemeral=True)
+        return
+
+    category_id = settings[guild_id]["category_id"]
+    category = guild.get_channel(category_id)
+    if not category:
+        await interaction.followup.send("❌ The voice channel category no longer exists. Please ask an admin to run `!echonetsetup` again.", ephemeral=True)
+        return
+
+    # Check permissions before creating channel
+    missing_perms = check_category_permissions(category)
+    if missing_perms:
+        perm_error = format_permission_error(missing_perms, f"Category {category.name}")
+        await interaction.followup.send(f"❌ Cannot create channel due to missing permissions:\n{perm_error}\n\nPlease ask an admin to grant these permissions.", ephemeral=True)
+        return
+
+    if request_only:
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(connect=False, view_channel=True),
+            user: discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True)
+        }
+    else:
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True),
+            user: discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True)
+        }
+
+    bot_member = guild.me
+    overwrites[bot_member] = discord.PermissionOverwrite(manage_channels=True, view_channel=True, connect=True)
+
+    try:
+        channel = await guild.create_voice_channel(
+            name=channel_name,
+            overwrites=overwrites,
+            category=category,
+            reason="User-created custom voice channel"
+        )
+    except discord.Forbidden:
+        await interaction.followup.send("❌ I don't have permission to create channels in that category. Please ensure I have the 'Manage Channels' permission.", ephemeral=True)
+        return
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error creating channel: {str(e)}", ephemeral=True)
+        return
+
+    menu_text_channel = self.menu_text_channel
+    if not menu_text_channel:
+        await interaction.followup.send("❌ Could not find the menu text channel! Please ask an admin to run `!echonetsetup`.", ephemeral=True)
+        return
+
+    # Purge all messages except the main menu
+    await purge_menu_text_channel(menu_text_channel)
+
+    access_type = "🔒 Request Only" if request_only else "🌐 Open"
+    embed = discord.Embed(
+        title="✅ Voice Channel Created!",
+        description=f"Channel <#{channel.id}> has been created by {user.mention}",
+        color=0x00ff00
+    )
+    embed.add_field(name="Channel Name", value=channel_name, inline=True)
+    embed.add_field(name="Duration", value=f"{self.days} day(s)", inline=True)
+    embed.add_field(name="Access Type", value=access_type, inline=True)
+    embed.add_field(name="Owner", value=user.mention, inline=True)
+    embed.add_field(name="Channel ID", value=str(channel.id), inline=False)
+
+    view = ChannelActionsView(channel.id, user.id)
+    menu_message = await menu_text_channel.send(embed=embed, view=view)
+
+    await interaction.followup.send(f"✅ Your voice channel **{channel_name}** has been created! Check <#{menu_text_channel.id}> to manage it.", ephemeral=True)
+
+    temp_channels[channel.id] = add_temp_channel(
+        channel.id, user.id, expires_at, request_only, menu_message.id, menu_text_channel.id
+    )
+    save_data()
+
+    # Schedule deletion of the management menu and re-post the main menu if needed
+    bot.loop.create_task(delete_management_menu_and_restore_main(menu_text_channel, menu_message))
