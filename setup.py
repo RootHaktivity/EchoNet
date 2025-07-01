@@ -1,94 +1,176 @@
-
 import discord
 from discord.ext import commands
 from data import load_settings, save_settings
 from perms import check_category_permissions, check_text_channel_permissions, format_permission_error
+import asyncio
 
 async def setup_echonet(ctx, bot):
-    """Set up EchoNet for a guild."""
-    guild = ctx.guild
+    """Set up EchoNet for a server."""
     settings = load_settings()
-    guild_id = str(guild.id)
-    
-    # Create or find category
-    category = None
-    for cat in guild.categories:
-        if cat.name.lower() == "echonet voice channels":
-            category = cat
-            break
-    
-    if not category:
-        try:
-            category = await guild.create_category("EchoNet Voice Channels")
-            await ctx.send(f"✅ Created category: **{category.name}**")
-        except discord.Forbidden:
-            await ctx.send("❌ I don't have permission to create categories. Please create a category named 'EchoNet Voice Channels' and give me 'Manage Channels' permission in it.")
-            return
-        except Exception as e:
-            await ctx.send(f"❌ Error creating category: {str(e)}")
-            return
-    
-    # Create or find text channel
-    text_channel = None
-    for channel in guild.text_channels:
-        if channel.name.lower() == "voice-control":
-            text_channel = channel
-            break
-    
-    if not text_channel:
-        try:
-            text_channel = await guild.create_text_channel("voice-control", category=category)
-            await ctx.send(f"✅ Created text channel: **{text_channel.name}**")
-        except discord.Forbidden:
-            await ctx.send("❌ I don't have permission to create text channels. Please create a text channel named 'voice-control' in the EchoNet category.")
-            return
-        except Exception as e:
-            await ctx.send(f"❌ Error creating text channel: {str(e)}")
-            return
-    
-    # Check permissions
-    missing_cat = check_category_permissions(category)
-    missing_txt = check_text_channel_permissions(text_channel)
-    
-    if missing_cat or missing_txt:
-        error_msg = "❌ Missing required permissions:\n"
-        if missing_cat:
-            error_msg += format_permission_error(missing_cat, f"Category {category.name}") + "\n"
-        if missing_txt:
-            error_msg += format_permission_error(missing_txt, f"Text Channel {text_channel.name}") + "\n"
-        error_msg += "\nPlease grant these permissions and run setup again."
-        await ctx.send(error_msg)
-        return
-    
-    # Save settings
-    if guild_id not in settings:
-        settings[guild_id] = {}
-    
-    settings[guild_id]["category_id"] = category.id
-    settings[guild_id]["text_channel_id"] = text_channel.id
-    save_settings(settings)
-    
+    guild_id = str(ctx.guild.id)
+
+    # Ask for voice channels category name
     embed = discord.Embed(
-        title="✅ EchoNet Setup Complete!",
-        description="Your server is now ready to use EchoNet.",
-        color=0x00ff00
+        title="🔧 EchoNet Setup - Step 1/3",
+        description="What would you like to name the category for voice channels?",
+        color=0xffaa00
     )
-    embed.add_field(name="Category", value=category.name, inline=True)
-    embed.add_field(name="Text Channel", value=text_channel.mention, inline=True)
-    embed.add_field(name="Next Step", value="Run `!voice` to set up the main menu", inline=False)
-    
+    embed.add_field(name="Default", value="EchoNet Voice Channels", inline=False)
+    embed.add_field(name="Instructions", value="Type your desired category name or 'default' to use the default name.", inline=False)
+
     await ctx.send(embed=embed)
+
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel
+
+    try:
+        msg = await bot.wait_for('message', check=check, timeout=60.0)
+        voice_category_name = "EchoNet Voice Channels" if msg.content.lower() == "default" else msg.content.strip()
+    except asyncio.TimeoutError:
+        await ctx.send("❌ Setup timed out. Please try again.")
+        return
+
+    # Ask for menu category name
+    embed = discord.Embed(
+        title="🔧 EchoNet Setup - Step 2/3",
+        description="What would you like to name the category for the menu text channel?",
+        color=0xffaa00
+    )
+    embed.add_field(name="Default", value="EchoNet Controls", inline=False)
+    embed.add_field(name="Instructions", value="Type your desired category name or 'default' to use the default name.", inline=False)
+
+    await ctx.send(embed=embed)
+
+    try:
+        msg = await bot.wait_for('message', check=check, timeout=60.0)
+        menu_category_name = "EchoNet Controls" if msg.content.lower() == "default" else msg.content.strip()
+    except asyncio.TimeoutError:
+        await ctx.send("❌ Setup timed out. Please try again.")
+        return
+
+    # Ask for menu text channel name
+    embed = discord.Embed(
+        title="🔧 EchoNet Setup - Step 3/3",
+        description="What would you like to name the text channel for the menu?",
+        color=0xffaa00
+    )
+    embed.add_field(name="Default", value="voice-controls", inline=False)
+    embed.add_field(name="Instructions", value="Type your desired channel name or 'default' to use the default name.", inline=False)
+
+    await ctx.send(embed=embed)
+
+    try:
+        msg = await bot.wait_for('message', check=check, timeout=60.0)
+        text_channel_name = "voice-controls" if msg.content.lower() == "default" else msg.content.strip()
+    except asyncio.TimeoutError:
+        await ctx.send("❌ Setup timed out. Please try again.")
+        return
+
+    embed = discord.Embed(
+        title="🔧 Setting up EchoNet...",
+        description="Creating necessary channels and categories.",
+        color=0xffaa00
+    )
+    setup_msg = await ctx.send(embed=embed)
+
+    try:
+        # Create or find voice channels category
+        voice_category = None
+        for cat in ctx.guild.categories:
+            if cat.name.lower() == voice_category_name.lower():
+                voice_category = cat
+                break
+
+        if not voice_category:
+            try:
+                voice_category = await ctx.guild.create_category_channel(
+                    voice_category_name,
+                    reason="EchoNet setup - Voice channel category"
+                )
+            except Exception as e:
+                await ctx.send(f"❌ Error creating voice category: {str(e)}")
+                return
+
+        # Create or find menu category
+        menu_category = None
+        for cat in ctx.guild.categories:
+            if cat.name.lower() == menu_category_name.lower():
+                menu_category = cat
+                break
+
+        if not menu_category:
+            try:
+                menu_category = await ctx.guild.create_category_channel(
+                    menu_category_name,
+                    reason="EchoNet setup - Menu category"
+                )
+            except Exception as e:
+                await ctx.send(f"❌ Error creating menu category: {str(e)}")
+                return
+
+        # Create text channel for menus in the menu category
+        text_channel = None
+        for channel in ctx.guild.text_channels:
+            if channel.name.lower() == text_channel_name.lower() and channel.category == menu_category:
+                text_channel = channel
+                break
+
+        if not text_channel:
+            try:
+                text_channel = await menu_category.create_text_channel(
+                    text_channel_name,
+                    reason="EchoNet setup - Menu text channel"
+                )
+            except Exception as e:
+                await ctx.send(f"❌ Error creating text channel: {str(e)}")
+                return
+
+        # Check permissions
+        missing_cat = check_category_permissions(menu_category)
+        missing_txt = check_text_channel_permissions(text_channel)
+
+        if missing_cat or missing_txt:
+            error_msg = "❌ Missing required permissions:\n"
+            if missing_cat:
+                error_msg += format_permission_error(missing_cat, f"Category {menu_category.name}") + "\n"
+            if missing_txt:
+                error_msg += format_permission_error(missing_txt, f"Text Channel {text_channel.name}") + "\n"
+            error_msg += "\nPlease grant these permissions and run setup again."
+            await ctx.send(error_msg)
+            return
+
+        # Save settings
+        if guild_id not in settings:
+            settings[guild_id] = {}
+
+        settings[guild_id]["category_id"] = menu_category.id
+        settings[guild_id]["text_channel_id"] = text_channel.id
+        save_settings(settings)
+
+        embed = discord.Embed(
+            title="✅ EchoNet Setup Complete!",
+            description="Your server is now ready to use EchoNet.",
+            color=0x00ff00
+        )
+        embed.add_field(name="Category", value=menu_category.name, inline=True)
+        embed.add_field(name="Text Channel", value=text_channel.mention, inline=True)
+        embed.add_field(name="Next Step", value="Run `!voice` to set up the main menu", inline=False)
+
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ An unexpected error occurred: {str(e)}")
 
 async def diagnose_permissions(ctx):
     """Diagnose permission issues for EchoNet."""
     settings = load_settings()
     guild_id = str(ctx.guild.id)
-    
+
     embed = discord.Embed(
         title="🔍 EchoNet Permission Diagnosis",
         color=0x0099ff
     )
-    
+
     if guild_id not in settings:
         embed.add_field(
             name="❌ Setup Status", 
@@ -97,13 +179,13 @@ async def diagnose_permissions(ctx):
         )
         await ctx.send(embed=embed)
         return
-    
+
     category_id = settings[guild_id].get("category_id")
     text_channel_id = settings[guild_id].get("text_channel_id")
-    
+
     category = ctx.guild.get_channel(category_id) if category_id else None
     text_channel = ctx.guild.get_channel(text_channel_id) if text_channel_id else None
-    
+
     if not category:
         embed.add_field(
             name="❌ Category", 
@@ -124,7 +206,7 @@ async def diagnose_permissions(ctx):
                 value="All permissions OK", 
                 inline=False
             )
-    
+
     if not text_channel:
         embed.add_field(
             name="❌ Text Channel", 
@@ -145,11 +227,11 @@ async def diagnose_permissions(ctx):
                 value="All permissions OK", 
                 inline=False
             )
-    
+
     embed.add_field(
         name="Required Permissions",
         value="**Category**: Manage Channels, View Channel\n**Text Channel**: Send Messages, Embed Links, Read Message History, Manage Messages",
         inline=False
     )
-    
+
     await ctx.send(embed=embed)

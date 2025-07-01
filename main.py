@@ -134,7 +134,6 @@ async def voice_command(ctx):
         return
     await purge_menu_text_channel(menu_text_channel)
     await ensure_main_menu(menu_text_channel)
-    await ctx.send(f"✅ Main menu is ready in <#{menu_text_channel.id}>.")
 
 @bot.command(name="echonetsetup")
 @commands.has_permissions(manage_channels=True)
