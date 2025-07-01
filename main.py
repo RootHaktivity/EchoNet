@@ -15,6 +15,7 @@ token = os.getenv('DISCORD_BOT_TOKEN')
 if not token:
     print("❌ Error: DISCORD_BOT_TOKEN environment variable not set!")
     print("Set it in your environment or in a .env file (DISCORD_BOT_TOKEN=...)")
+    print(f"Available env vars: {list(os.environ.keys())}")
     exit(1)
 
 # Import our custom modules
@@ -451,7 +452,9 @@ async def help_command(ctx):
     await ctx.send(embed=embed)
 
 if __name__ == "__main__":
+    print("🚀 Starting EchoNet Discord bot...")
     try:
         bot.run(token)
     except Exception as e:
-        print(f"❌ Error starting bot: {e}")
+        print(f"❌ Bot failed to start: {e}")
+        raise
