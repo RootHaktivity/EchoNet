@@ -307,7 +307,208 @@ class ChannelManagementView(discord.ui.View):
         super().__init__(timeout=300)
         self.channel_id = channel_id
 
-    @discord.ui.button(label="Delete Channel", style=discord.ButtonStyle.red, emoji="🗑️")
+    @discord.ui.button(label="Transfer Ownership", style=discord.ButtonStyle.blurple, emoji="👑", row=0)
+    async def transfer_ownership(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the channel owner can transfer ownership.", ephemeral=True)
+            return
+
+        modal = TransferOwnershipModal(self.channel_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Invite User", style=discord.ButtonStyle.green, emoji="📨", row=0)
+    async def invite_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the channel owner can invite users.", ephemeral=True)
+            return
+
+        modal = InviteUserModal(self.channel_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Kick User", style=discord.ButtonStyle.red, emoji="👢", row=0)
+    async def kick_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the channel owner can kick users.", ephemeral=True)
+            return
+
+        view = KickUserView(self.channel_id, interaction.user.id)
+        await interaction.response.send_message("Select a user to kick:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Channel Stats", style=discord.ButtonStyle.secondary, emoji="📊", row=0)
+    async def channel_stats(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        info = temp_channels[self.channel_id]
+        channel = interaction.guild.get_channel(self.channel_id)
+        if not channel:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        owner = interaction.guild.get_member(info["owner_id"])
+        created_time = info["expires_at"] - datetime.timedelta(days=30)  # Estimate based on max duration
+        
+        embed = discord.Embed(
+            title=f"📊 Channel Statistics: {channel.name}",
+            color=0x3498db
+        )
+        embed.add_field(name="Owner", value=owner.mention if owner else "Unknown", inline=True)
+        embed.add_field(name="Current Members", value=str(len(channel.members)), inline=True)
+        embed.add_field(name="Access Type", value="🔒 Request Only" if info.get("request_only") else "🌐 Open", inline=True)
+        embed.add_field(name="Expires", value=f"<t:{int(info['expires_at'].timestamp())}:R>", inline=True)
+        embed.add_field(name="Pending Requests", value=str(len(info.get("pending_requests", []))), inline=True)
+        embed.add_field(name="Blocked Users", value=str(len(info.get("blocked_users", []))), inline=True)
+        embed.add_field(name="User Limit", value=str(info.get("user_limit", "No limit")), inline=True)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Extend Duration", style=discord.ButtonStyle.primary, emoji="⏰", row=1)
+    async def extend_duration(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the channel owner can extend duration.", ephemeral=True)
+            return
+
+        view = ExtendDurationView(self.channel_id, interaction.user.id)
+        await interaction.response.send_message("Choose how much to extend the channel duration:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Change Access Type", style=discord.ButtonStyle.secondary, emoji="🔄", row=1)
+    async def change_access_type(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the channel owner can change access type.", ephemeral=True)
+            return
+
+        info = temp_channels[self.channel_id]
+        current_type = info.get("request_only", False)
+        new_type = not current_type
+        info["request_only"] = new_type
+        save_temp_channels(temp_channels)
+
+        # Update channel permissions
+        channel = interaction.guild.get_channel(self.channel_id)
+        if channel:
+            overwrites = channel.overwrites
+            if new_type:  # Changing to request only
+                overwrites[interaction.guild.default_role] = discord.PermissionOverwrite(connect=False, view_channel=True)
+            else:  # Changing to open
+                overwrites[interaction.guild.default_role] = discord.PermissionOverwrite(connect=True, view_channel=True)
+            
+            try:
+                await channel.edit(overwrites=overwrites, reason="Access type changed by owner")
+                access_text = "🔒 Request Only" if new_type else "🌐 Open"
+                await interaction.response.send_message(f"✅ Channel access type changed to **{access_text}**!", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.response.send_message("❌ I don't have permission to edit the channel.", ephemeral=True)
+
+    @discord.ui.button(label="Set User Limit", style=discord.ButtonStyle.secondary, emoji="👥", row=1)
+    async def set_user_limit(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the channel owner can set user limit.", ephemeral=True)
+            return
+
+        modal = SetUserLimitModal(self.channel_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="View Pending Requests", style=discord.ButtonStyle.primary, emoji="📋", row=1)
+    async def view_pending_requests(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the channel owner can view pending requests.", ephemeral=True)
+            return
+
+        info = temp_channels[self.channel_id]
+        pending = info.get("pending_requests", [])
+        
+        if not pending:
+            await interaction.response.send_message("❌ No pending requests for this channel.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="📋 Pending Join Requests",
+            color=0x3498db
+        )
+        
+        for user_id in pending:
+            user = interaction.guild.get_member(user_id)
+            if user:
+                embed.add_field(
+                    name=user.display_name,
+                    value=user.mention,
+                    inline=True
+                )
+
+        view = ManagePendingRequestsView(self.channel_id, interaction.user.id, pending)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="Block User", style=discord.ButtonStyle.secondary, emoji="🚫", row=2)
+    async def block_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the channel owner can block users.", ephemeral=True)
+            return
+
+        modal = BlockUserModal(self.channel_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Edit Channel", style=discord.ButtonStyle.primary, emoji="✏️", row=2)
+    async def edit_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = EditChannelView(self.channel_id, interaction.user.id)
+        await interaction.response.send_message("Edit your channel settings below:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Unblock Users", style=discord.ButtonStyle.success, emoji="✅", row=2)
+    async def unblock_users(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = UnblockedUsersView(self.channel_id, interaction.user.id)
+        await interaction.response.send_message("Manage your blocked users below:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Delete Channel", style=discord.ButtonStyle.red, emoji="🗑️", row=2)
     async def delete_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
         from data import load_temp_channels, save_temp_channels
         temp_channels = load_temp_channels()
@@ -330,31 +531,6 @@ class ChannelManagementView(discord.ui.View):
                 await interaction.response.send_message("❌ I don't have permission to delete the channel.", ephemeral=True)
         else:
             await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
-
-    @discord.ui.button(label="Block User", style=discord.ButtonStyle.secondary, emoji="🚫")
-    async def block_user(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from data import load_temp_channels
-        temp_channels = load_temp_channels()
-        if self.channel_id not in temp_channels:
-            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
-            return
-
-        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
-            await interaction.response.send_message("❌ Only the channel owner can block users.", ephemeral=True)
-            return
-
-        modal = BlockUserModal(self.channel_id)
-        await interaction.response.send_modal(modal)
-
-    @discord.ui.button(label="Edit Channel", style=discord.ButtonStyle.primary, emoji="✏️")
-    async def edit_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = EditChannelView(self.channel_id, interaction.user.id)
-        await interaction.response.send_message("Edit your channel settings below:", view=view, ephemeral=True)
-
-    @discord.ui.button(label="Unblock Users", style=discord.ButtonStyle.success, emoji="✅")
-    async def unblock_users(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = UnblockedUsersView(self.channel_id, interaction.user.id)
-        await interaction.response.send_message("Manage your blocked users below:", view=view, ephemeral=True)
 
 class EditChannelView(discord.ui.View):
     def __init__(self, channel_id, user_id):
@@ -791,3 +967,368 @@ async def delete_management_menu_and_restore_main(menu_text_channel, management_
         pass
     await purge_menu_text_channel(menu_text_channel)
     await ensure_main_menu(menu_text_channel)
+
+
+class TransferOwnershipModal(discord.ui.Modal, title="Transfer Ownership"):
+    def __init__(self, channel_id):
+        super().__init__()
+        self.channel_id = channel_id
+
+    user_id = discord.ui.TextInput(label="New Owner (User ID or @mention)", placeholder="Enter user ID or mention them...")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        # Parse user ID
+        user_input = self.user_id.value.strip()
+        if user_input.startswith('<@') and user_input.endswith('>'):
+            new_owner_id = int(user_input[2:-1].replace('!', ''))
+        else:
+            try:
+                new_owner_id = int(user_input)
+            except ValueError:
+                await interaction.response.send_message("❌ Invalid user ID or mention.", ephemeral=True)
+                return
+
+        new_owner = interaction.guild.get_member(new_owner_id)
+        if not new_owner:
+            await interaction.response.send_message("❌ User not found in this server.", ephemeral=True)
+            return
+
+        if new_owner_id == temp_channels[self.channel_id]["owner_id"]:
+            await interaction.response.send_message("❌ This user is already the owner.", ephemeral=True)
+            return
+
+        # Transfer ownership
+        temp_channels[self.channel_id]["owner_id"] = new_owner_id
+        save_temp_channels(temp_channels)
+
+        # Update channel permissions
+        channel = interaction.guild.get_channel(self.channel_id)
+        if channel:
+            try:
+                overwrites = channel.overwrites
+                # Remove old owner's manage permissions
+                old_owner = interaction.user
+                if old_owner in overwrites:
+                    overwrites[old_owner] = discord.PermissionOverwrite(connect=True, view_channel=True)
+                
+                # Give new owner manage permissions
+                overwrites[new_owner] = discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True)
+                await channel.edit(overwrites=overwrites, reason="Ownership transferred")
+                
+                # Notify new owner
+                try:
+                    await new_owner.send(f"🎉 You are now the owner of the voice channel **{channel.name}** in **{interaction.guild.name}**!")
+                except:
+                    pass
+                
+                await interaction.response.send_message(f"✅ Ownership of the channel has been transferred to {new_owner.display_name}!", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.response.send_message("❌ I don't have permission to edit the channel.", ephemeral=True)
+
+class InviteUserModal(discord.ui.Modal, title="Invite User"):
+    def __init__(self, channel_id):
+        super().__init__()
+        self.channel_id = channel_id
+
+    user_id = discord.ui.TextInput(label="User to Invite (User ID or @mention)", placeholder="Enter user ID or mention them...")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        # Parse user ID
+        user_input = self.user_id.value.strip()
+        if user_input.startswith('<@') and user_input.endswith('>'):
+            invite_user_id = int(user_input[2:-1].replace('!', ''))
+        else:
+            try:
+                invite_user_id = int(user_input)
+            except ValueError:
+                await interaction.response.send_message("❌ Invalid user ID or mention.", ephemeral=True)
+                return
+
+        invite_user = interaction.guild.get_member(invite_user_id)
+        if not invite_user:
+            await interaction.response.send_message("❌ User not found in this server.", ephemeral=True)
+            return
+
+        info = temp_channels[self.channel_id]
+        if invite_user_id in info.get("blocked_users", []):
+            await interaction.response.send_message("❌ This user is blocked from the channel.", ephemeral=True)
+            return
+
+        channel = interaction.guild.get_channel(self.channel_id)
+        if not channel:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        # Grant access to the channel
+        try:
+            overwrites = channel.overwrites
+            overwrites[invite_user] = discord.PermissionOverwrite(connect=True, view_channel=True)
+            await channel.edit(overwrites=overwrites, reason="User invited by owner")
+            
+            # Remove from pending requests if they're there
+            if invite_user_id in info.get("pending_requests", []):
+                info["pending_requests"].remove(invite_user_id)
+                save_temp_channels(temp_channels)
+            
+            # Notify invited user
+            try:
+                await invite_user.send(f"🎉 You've been invited to join the voice channel **{channel.name}** in **{interaction.guild.name}**! You can now join the channel.")
+            except:
+                pass
+            
+            await interaction.response.send_message(f"✅ Successfully invited {invite_user.display_name} to the channel!", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ I don't have permission to edit the channel.", ephemeral=True)
+
+class KickUserView(discord.ui.View):
+    def __init__(self, channel_id, owner_id):
+        super().__init__(timeout=120)
+        self.channel_id = channel_id
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    @discord.ui.button(label="Select User to Kick", style=discord.ButtonStyle.red, emoji="👢")
+    async def select_user_to_kick(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = interaction.guild.get_channel(self.channel_id)
+        if not channel:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+            return
+
+        # Get users currently in the channel (excluding owner and bot)
+        kickable_users = [member for member in channel.members 
+                         if member.id != self.owner_id and not member.bot]
+
+        if not kickable_users:
+            await interaction.response.send_message("❌ No users to kick from this channel.", ephemeral=True)
+            return
+
+        options = [discord.SelectOption(label=member.display_name, value=str(member.id)) 
+                  for member in kickable_users[:25]]  # Discord limit
+        
+        select = discord.ui.Select(placeholder="Select a user to kick...", options=options)
+
+        async def select_callback(select_interaction: discord.Interaction):
+            user_id = int(select_interaction.data['values'][0])
+            user = interaction.guild.get_member(user_id)
+            if user and user.voice and user.voice.channel == channel:
+                try:
+                    await user.move_to(None, reason="Kicked by channel owner")
+                    await select_interaction.response.send_message(f"✅ Kicked {user.display_name} from the channel.", ephemeral=True)
+                except discord.Forbidden:
+                    await select_interaction.response.send_message("❌ I don't have permission to move users.", ephemeral=True)
+            else:
+                await select_interaction.response.send_message("❌ User is not in the channel.", ephemeral=True)
+
+        select.callback = select_callback
+        view = discord.ui.View(timeout=60)
+        view.add_item(select)
+        await interaction.response.send_message("Select a user to kick:", view=view, ephemeral=True)
+
+class ExtendDurationView(discord.ui.View):
+    def __init__(self, channel_id, owner_id):
+        super().__init__(timeout=120)
+        self.channel_id = channel_id
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    @discord.ui.button(label="1 Hour", style=discord.ButtonStyle.secondary, emoji="⏰")
+    async def extend_1_hour(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.extend_channel(interaction, hours=1)
+
+    @discord.ui.button(label="6 Hours", style=discord.ButtonStyle.secondary, emoji="⏰")
+    async def extend_6_hours(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.extend_channel(interaction, hours=6)
+
+    @discord.ui.button(label="1 Day", style=discord.ButtonStyle.secondary, emoji="📅")
+    async def extend_1_day(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.extend_channel(interaction, days=1)
+
+    @discord.ui.button(label="1 Week", style=discord.ButtonStyle.secondary, emoji="📆")
+    async def extend_1_week(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.extend_channel(interaction, days=7)
+
+    async def extend_channel(self, interaction: discord.Interaction, days=0, hours=0):
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
+        
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+            return
+
+        info = temp_channels[self.channel_id]
+        current_expires = info["expires_at"]
+        new_expires = current_expires + datetime.timedelta(days=days, hours=hours)
+        
+        # Check if new expiration is within 60 days from now
+        max_expires = datetime.datetime.utcnow() + datetime.timedelta(days=60)
+        if new_expires > max_expires:
+            await interaction.response.send_message("❌ Cannot extend beyond 60 days from now.", ephemeral=True)
+            return
+
+        info["expires_at"] = new_expires
+        save_temp_channels(temp_channels)
+        
+        duration_text = f"{days} day(s)" if days > 0 else f"{hours} hour(s)"
+        await interaction.response.send_message(f"✅ Channel duration extended by {duration_text}. New expiration: <t:{int(new_expires.timestamp())}:R>", ephemeral=True)
+
+class SetUserLimitModal(discord.ui.Modal, title="Set User Limit"):
+    def __init__(self, channel_id):
+        super().__init__()
+        self.channel_id = channel_id
+
+    user_limit = discord.ui.TextInput(label="User Limit (0 for no limit)", placeholder="Enter number of users (0-99)...")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        try:
+            limit = int(self.user_limit.value)
+            if limit < 0 or limit > 99:
+                await interaction.response.send_message("❌ User limit must be between 0 and 99 (0 = no limit).", ephemeral=True)
+                return
+
+            channel = interaction.guild.get_channel(self.channel_id)
+            if not channel:
+                await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+                return
+
+            try:
+                await channel.edit(user_limit=limit if limit > 0 else None, reason="User limit changed by owner")
+                temp_channels[self.channel_id]["user_limit"] = limit if limit > 0 else None
+                save_temp_channels(temp_channels)
+                
+                limit_text = f"{limit} users" if limit > 0 else "No limit"
+                await interaction.response.send_message(f"✅ User limit set to: **{limit_text}**", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.response.send_message("❌ I don't have permission to edit the channel.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter a valid number.", ephemeral=True)
+
+class ManagePendingRequestsView(discord.ui.View):
+    def __init__(self, channel_id, owner_id, pending_requests):
+        super().__init__(timeout=120)
+        self.channel_id = channel_id
+        self.owner_id = owner_id
+        self.pending_requests = pending_requests
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    @discord.ui.button(label="Approve Request", style=discord.ButtonStyle.green, emoji="✅")
+    async def approve_request(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.pending_requests:
+            await interaction.response.send_message("❌ No pending requests.", ephemeral=True)
+            return
+
+        options = []
+        for user_id in self.pending_requests:
+            user = interaction.guild.get_member(user_id)
+            if user:
+                options.append(discord.SelectOption(label=user.display_name, value=str(user_id)))
+
+        if not options:
+            await interaction.response.send_message("❌ No valid pending requests found.", ephemeral=True)
+            return
+
+        select = discord.ui.Select(placeholder="Select user to approve...", options=options)
+
+        async def approve_callback(select_interaction: discord.Interaction):
+            user_id = int(select_interaction.data['values'][0])
+            await self.process_request(select_interaction, user_id, approve=True)
+
+        select.callback = approve_callback
+        view = discord.ui.View(timeout=60)
+        view.add_item(select)
+        await interaction.response.send_message("Select a user to approve:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Deny Request", style=discord.ButtonStyle.red, emoji="❌")
+    async def deny_request(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.pending_requests:
+            await interaction.response.send_message("❌ No pending requests.", ephemeral=True)
+            return
+
+        options = []
+        for user_id in self.pending_requests:
+            user = interaction.guild.get_member(user_id)
+            if user:
+                options.append(discord.SelectOption(label=user.display_name, value=str(user_id)))
+
+        if not options:
+            await interaction.response.send_message("❌ No valid pending requests found.", ephemeral=True)
+            return
+
+        select = discord.ui.Select(placeholder="Select user to deny...", options=options)
+
+        async def deny_callback(select_interaction: discord.Interaction):
+            user_id = int(select_interaction.data['values'][0])
+            await self.process_request(select_interaction, user_id, approve=False)
+
+        select.callback = deny_callback
+        view = discord.ui.View(timeout=60)
+        view.add_item(select)
+        await interaction.response.send_message("Select a user to deny:", view=view, ephemeral=True)
+
+    async def process_request(self, interaction: discord.Interaction, user_id: int, approve: bool):
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
+        
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+            return
+            
+        info = temp_channels[self.channel_id]
+        if user_id not in info.get("pending_requests", []):
+            await interaction.response.send_message("❌ Request not found!", ephemeral=True)
+            return
+
+        info["pending_requests"].remove(user_id)
+        save_temp_channels(temp_channels)
+        
+        user = interaction.guild.get_member(user_id)
+        channel = interaction.guild.get_channel(self.channel_id)
+        
+        if approve:
+            # Grant access
+            if channel and user:
+                try:
+                    overwrites = channel.overwrites
+                    overwrites[user] = discord.PermissionOverwrite(connect=True, view_channel=True)
+                    await channel.edit(overwrites=overwrites, reason="Join request approved")
+                    
+                    # Notify user
+                    try:
+                        await user.send(f"✅ Your request to join **{channel.name}** in **{interaction.guild.name}** has been approved!")
+                    except:
+                        pass
+                    
+                    await interaction.response.send_message(f"✅ Approved {user.display_name}'s request!", ephemeral=True)
+                except discord.Forbidden:
+                    await interaction.response.send_message("❌ I don't have permission to edit the channel.", ephemeral=True)
+        else:
+            # Deny request
+            if user and channel:
+                try:
+                    await user.send(f"❌ Your request to join **{channel.name}** in **{interaction.guild.name}** has been denied.")
+                except:
+                    pass
+                await interaction.response.send_message(f"❌ Denied {user.display_name}'s request.", ephemeral=True)

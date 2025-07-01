@@ -50,9 +50,10 @@ def save_temp_channels(temp_channels):
             "pending_requests": info.get("pending_requests", []),
             "menu_message_id": info.get("menu_message_id"),
             "menu_channel_id": info.get("menu_channel_id"),
-            "blocked_users": info.get("blocked_users", [])
+            "blocked_users": info.get("blocked_users", []),
+            "user_limit": info.get("user_limit")
         }
-    
+
     with open(CHANNELS_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -67,7 +68,8 @@ def save_temp_channels(temp_channels):
             "pending_requests": info.get("pending_requests", []),
             "menu_message_id": info.get("menu_message_id"),
             "menu_channel_id": info.get("menu_channel_id"),
-            "blocked_users": info.get("blocked_users", [])
+            "blocked_users": info.get("blocked_users", []),
+            "user_limit": info.get("user_limit")
         }
     with open(CHANNELS_FILE, "w") as f:
         json.dump(data, f, indent=2)
