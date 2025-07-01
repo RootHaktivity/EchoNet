@@ -926,12 +926,43 @@ class RequestJoinButton(discord.ui.Button):
 async def purge_menu_text_channel(menu_text_channel):
     """Remove all messages from the menu text channel except pinned ones."""
     try:
-        async for message in menu_text_channel.history(limit=100):
-            if not message.pinned:
+        # Delete messages in batches for better performance
+        messages_to_delete = []
+        
+        # Check all messages, not just the last 100
+        async for message in menu_text_channel.history(limit=None):
+            if not message.pinned and message.author != menu_text_channel.guild.me:
+                messages_to_delete.append(message)
+            # Also delete old bot messages that aren't the main menu
+            elif (message.author == menu_text_channel.guild.me and 
+                  not message.content.startswith(MAIN_MENU_TAG)):
+                messages_to_delete.append(message)
+        
+        # Delete messages in batches of 100 (Discord's bulk delete limit)
+        while messages_to_delete:
+            batch = messages_to_delete[:100]
+            messages_to_delete = messages_to_delete[100:]
+            
+            if len(batch) == 1:
+                # Single message deletion
                 try:
-                    await message.delete()
+                    await batch[0].delete()
                 except:
                     pass
+            else:
+                # Bulk deletion for multiple messages
+                try:
+                    await menu_text_channel.delete_messages(batch)
+                except discord.HTTPException:
+                    # If bulk delete fails, delete individually
+                    for msg in batch:
+                        try:
+                            await msg.delete()
+                        except:
+                            pass
+                except:
+                    pass
+                    
     except Exception as e:
         print(f"Error purging menu channel: {e}")
 

@@ -94,15 +94,75 @@ async def check_expired_channels():
     if to_delete:
         save_data()
 
+@tasks.loop(minutes=30)
+async def clean_menu_channels():
+    """Periodically clean menu text channels across all servers."""
+    settings = load_settings()
+    for guild_id, guild_settings in settings.items():
+        try:
+            guild = bot.get_guild(int(guild_id))
+            if not guild:
+                continue
+                
+            text_channel_id = guild_settings.get("text_channel_id")
+            if not text_channel_id:
+                continue
+                
+            text_channel = guild.get_channel(text_channel_id)
+            if not text_channel:
+                continue
+                
+            # Check if there are any non-bot messages or old bot messages
+            should_clean = False
+            async for message in text_channel.history(limit=50):
+                if (not message.pinned and 
+                    (message.author != guild.me or 
+                     not message.content.startswith(MAIN_MENU_TAG))):
+                    should_clean = True
+                    break
+            
+            if should_clean:
+                from menus import purge_menu_text_channel, ensure_main_menu
+                await purge_menu_text_channel(text_channel)
+                await ensure_main_menu(text_channel)
+                
+        except Exception as e:
+            print(f"Error cleaning menu channel for guild {guild_id}: {e}")
+
 @bot.event
 async def on_ready():
     print(f"✅ Bot logged in as {bot.user}")
     load_data()
     check_expired_channels.start()
+    clean_menu_channels.start()
     bot.add_view(MainMenu())
     bot.add_view(ApproveDenyView())
     print("🔄 Background tasks started")
     print(f"📊 Loaded {len(temp_channels)} active channels")
+
+@bot.event
+async def on_message(message):
+    """Handle messages and keep menu channels clean."""
+    # Process commands first
+    await bot.process_commands(message)
+    
+    # Don't process bot's own messages
+    if message.author == bot.user:
+        return
+        
+    # Check if this message is in a menu text channel
+    settings = load_settings()
+    guild_id = str(message.guild.id) if message.guild else None
+    
+    if guild_id and guild_id in settings:
+        text_channel_id = settings[guild_id].get("text_channel_id")
+        if text_channel_id == message.channel.id:
+            # This is a menu channel, delete the user's message after a short delay
+            try:
+                await asyncio.sleep(2)  # Give users a moment to see their message was received
+                await message.delete()
+            except:
+                pass  # Ignore if we can't delete (permissions, message already deleted, etc.)
 
 @bot.event
 async def on_command_error(ctx, error):
