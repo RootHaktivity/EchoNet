@@ -85,32 +85,95 @@ class CreateChannelModal(discord.ui.Modal, title="Create Voice Channel"):
         super().__init__()
 
     channel_name = discord.ui.TextInput(label="Channel Name", placeholder="Enter your channel name...", max_length=50)
-    duration_days = discord.ui.TextInput(label="Duration (days)", placeholder="1-60 days", default="1", max_length=2)
-    access_type = discord.ui.TextInput(label="Access Type", placeholder="Type 'open' or 'request'", default="open", max_length=10)
 
     async def on_submit(self, interaction: discord.Interaction):
+        # Show the dropdown view after getting the channel name
+        view = CreateChannelView(self.channel_name.value)
+        embed = discord.Embed(
+            title="🎤 Create Voice Channel",
+            description=f"**Channel Name:** {self.channel_name.value}\n\nPlease select the duration and access type:",
+            color=0x00ff00
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+class CreateChannelView(discord.ui.View):
+    def __init__(self, channel_name):
+        super().__init__(timeout=120)
+        self.channel_name = channel_name
+        self.duration_days = 1  # Default
+        self.request_only = False  # Default
+
+        # Duration dropdown
+        duration_options = [
+            discord.SelectOption(label="1 Day", value="1", description="Channel expires in 1 day"),
+            discord.SelectOption(label="3 Days", value="3", description="Channel expires in 3 days"),
+            discord.SelectOption(label="7 Days", value="7", description="Channel expires in 1 week"),
+            discord.SelectOption(label="14 Days", value="14", description="Channel expires in 2 weeks"),
+            discord.SelectOption(label="30 Days", value="30", description="Channel expires in 1 month"),
+            discord.SelectOption(label="60 Days", value="60", description="Channel expires in 2 months")
+        ]
+        duration_select = discord.ui.Select(
+            placeholder="Choose duration...",
+            options=duration_options,
+            custom_id="duration_select"
+        )
+        duration_select.callback = self.duration_callback
+        self.add_item(duration_select)
+
+        # Access type dropdown
+        access_options = [
+            discord.SelectOption(label="Open", value="open", description="Anyone can join immediately", emoji="🌐"),
+            discord.SelectOption(label="Request Only", value="request", description="Users must request to join", emoji="🔒")
+        ]
+        access_select = discord.ui.Select(
+            placeholder="Choose access type...",
+            options=access_options,
+            custom_id="access_select"
+        )
+        access_select.callback = self.access_callback
+        self.add_item(access_select)
+
+    async def duration_callback(self, interaction: discord.Interaction):
+        self.duration_days = int(interaction.data['values'][0])
+        await interaction.response.defer()
+        await self.update_embed(interaction)
+
+    async def access_callback(self, interaction: discord.Interaction):
+        self.request_only = interaction.data['values'][0] == "request"
+        await interaction.response.defer()
+        await self.update_embed(interaction)
+
+    async def update_embed(self, interaction: discord.Interaction):
+        access_text = "🔒 Request Only" if self.request_only else "🌐 Open"
+        embed = discord.Embed(
+            title="🎤 Create Voice Channel",
+            description=f"**Channel Name:** {self.channel_name}\n**Duration:** {self.duration_days} day(s)\n**Access Type:** {access_text}",
+            color=0x00ff00
+        )
+        
+        # Enable create button if both selections are made
+        create_button = discord.ui.Button(
+            label="Create Channel",
+            style=discord.ButtonStyle.green,
+            emoji="✅",
+            custom_id="create_channel_final"
+        )
+        create_button.callback = self.create_channel
+        
+        # Remove old create button if it exists
+        for item in self.children:
+            if isinstance(item, discord.ui.Button) and item.custom_id == "create_channel_final":
+                self.remove_item(item)
+                break
+        
+        self.add_item(create_button)
+        await interaction.edit_original_response(embed=embed, view=self)
+
+    async def create_channel(self, interaction: discord.Interaction):
         settings = load_settings()
         guild_id = str(interaction.guild.id)
         category_id = settings[guild_id]["category_id"]
         category = interaction.guild.get_channel(category_id)
-
-        # Validate duration
-        try:
-            days = int(self.duration_days.value)
-            if not 1 <= days <= 60:
-                await interaction.response.send_message("❌ Duration must be between 1 and 60 days.", ephemeral=True)
-                return
-        except ValueError:
-            await interaction.response.send_message("❌ Duration must be a valid number.", ephemeral=True)
-            return
-
-        # Validate access type
-        access_type = self.access_type.value.lower().strip()
-        if access_type not in ["open", "request"]:
-            await interaction.response.send_message("❌ Access type must be 'open' or 'request'.", ephemeral=True)
-            return
-
-        request_only = access_type == "request"
 
         try:
             # Create the voice channel
@@ -122,26 +185,26 @@ class CreateChannelModal(discord.ui.Modal, title="Create Voice Channel"):
             bot_member = interaction.guild.me
             overwrites[bot_member] = discord.PermissionOverwrite(manage_channels=True, view_channel=True, connect=True)
 
-            if request_only:
+            if self.request_only:
                 overwrites[interaction.guild.default_role] = discord.PermissionOverwrite(connect=False, view_channel=True)
             else:
                 overwrites[interaction.guild.default_role] = discord.PermissionOverwrite(connect=True, view_channel=True)
 
             channel = await category.create_voice_channel(
-                name=self.channel_name.value,
+                name=self.channel_name,
                 overwrites=overwrites,
                 reason=f"Temporary channel created by {interaction.user}"
             )
 
             # Calculate expiration
-            expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+            expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=self.duration_days)
 
             # Save channel data
             temp_channels = load_temp_channels()
             temp_channels[channel.id] = {
                 "owner_id": interaction.user.id,
                 "expires_at": expires_at,
-                "request_only": request_only,
+                "request_only": self.request_only,
                 "pending_requests": [],
                 "menu_message_id": None,
                 "menu_channel_id": None,
@@ -155,20 +218,12 @@ class CreateChannelModal(discord.ui.Modal, title="Create Voice Channel"):
                 description=f"Your channel **{channel.name}** has been created.",
                 color=0x00ff00
             )
-            embed.add_field(name="Duration", value=f"{days} days", inline=True)
-            embed.add_field(name="Access", value="Request Only" if request_only else "Open", inline=True)
+            embed.add_field(name="Duration", value=f"{self.duration_days} days", inline=True)
+            embed.add_field(name="Access", value="Request Only" if self.request_only else "Open", inline=True)
             embed.add_field(name="Expires", value=f"<t:{int(expires_at.timestamp())}:R>", inline=True)
 
             view = ChannelManagementView(channel.id)
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-            # Schedule cleanup - modified to work with ephemeral=True
-            await asyncio.sleep(5)  # Give the user time to see the message
-            original_response = await interaction.original_response()
-            try:
-                await original_response.delete()
-            except:
-                pass
+            await interaction.response.edit_message(embed=embed, view=view)
 
         except discord.Forbidden:
             await interaction.response.send_message("❌ I don't have permission to create voice channels.", ephemeral=True)
