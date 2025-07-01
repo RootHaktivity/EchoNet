@@ -141,6 +141,60 @@ async def on_ready():
     print(f"📊 Loaded {len(temp_channels)} active channels")
 
 @bot.event
+async def on_guild_join(guild):
+    """Send welcome message when bot joins a new server."""
+    # Find a channel where the bot can send messages
+    channel = None
+    
+    # Try to find system channel first
+    if guild.system_channel and guild.system_channel.permissions_for(guild.me).send_messages:
+        channel = guild.system_channel
+    else:
+        # Find any text channel where bot can send messages
+        for text_channel in guild.text_channels:
+            if text_channel.permissions_for(guild.me).send_messages:
+                channel = text_channel
+                break
+    
+    if channel:
+        embed = discord.Embed(
+            title="🎉 Thanks for adding EchoNet!",
+            description="I'm here to help you create awesome temporary voice channels!",
+            color=0x00ff00
+        )
+        
+        embed.add_field(
+            name="🚀 Quick Setup (2 steps)",
+            value="**Step 1:** Run `!echonetsetup` (requires Manage Channels permission)\n**Step 2:** Run `!voice` to create the interactive menu",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="✨ What I Can Do",
+            value="• Create temporary voice channels (1-60 days)\n• Set access control (Open/Request Only)\n• Automatic cleanup when expired\n• Full channel management tools\n• User blocking and invitation system",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🔧 Required Permissions",
+            value="Make sure I have these permissions:\n• **Manage Channels** (create/delete channels)\n• **Send Messages** & **Embed Links**\n• **Manage Messages** (keep menus clean)\n• **Read Message History**",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="📚 Need Help?",
+            value="• `!help` - Complete setup and usage guide\n• `!echonetdiagnose` - Check permission issues\n• `!echonetstats` - View server statistics",
+            inline=False
+        )
+        
+        embed.set_footer(text="EchoNet Bot - Ready to make voice channels awesome!")
+        
+        try:
+            await channel.send(embed=embed)
+        except:
+            pass  # Silently fail if we can't send the message
+
+@bot.event
 async def on_message(message):
     """Handle messages and keep menu channels clean."""
     # Process commands first
@@ -235,34 +289,165 @@ async def echonetstats_command(ctx):
             )
     await ctx.send(embed=embed)
 
+@bot.command(name="echonetguide")
+@commands.has_permissions(manage_channels=True)
+async def echonetguide_command(ctx):
+    """Comprehensive setup and usage guide."""
+    settings = load_settings()
+    guild_id = str(ctx.guild.id)
+    is_setup = guild_id in settings
+    
+    embed = discord.Embed(
+        title="📖 EchoNet Complete Setup Guide",
+        description="Follow this guide to set up and use EchoNet in your server.",
+        color=0x3498db
+    )
+    
+    if not is_setup:
+        embed.add_field(
+            name="🟥 Step 1: Initial Setup (Not Done)",
+            value="Run `!echonetsetup` to begin setup.\n\n**This will:**\n• Ask for category names\n• Ask for text channel name\n• Create categories and channels\n• Set up permissions",
+            inline=False
+        )
+        embed.add_field(
+            name="⬜ Step 2: Create Menu (Waiting)",
+            value="After setup, run `!voice` to create the interactive menu.",
+            inline=False
+        )
+    else:
+        text_channel_id = settings[guild_id].get("text_channel_id")
+        text_channel = ctx.guild.get_channel(text_channel_id) if text_channel_id else None
+        
+        embed.add_field(
+            name="✅ Step 1: Initial Setup (Complete)",
+            value="Setup is complete! Your categories and channels are ready.",
+            inline=False
+        )
+        
+        if text_channel:
+            embed.add_field(
+                name="✅ Step 2: Create Menu",
+                value=f"Your menu channel is {text_channel.mention}.\nRun `!voice` to refresh the menu if needed.",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="🟨 Step 2: Create Menu (Channel Missing)",
+                value="Your text channel is missing. Run `!echonetsetup` again to recreate it.",
+                inline=False
+            )
+    
+    embed.add_field(
+        name="🎯 How Users Create Channels",
+        value="1. Go to your EchoNet menu channel\n2. Click '🎤 Create Voice Channel'\n3. Enter channel name\n4. Choose duration (1-60 days)\n5. Pick access type (Open/Request Only)\n6. Click 'Create Channel'",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🛠️ Channel Management Features",
+        value="**Channel owners can:**\n• Transfer ownership\n• Invite/kick users\n• Block/unblock users\n• Change access type\n• Set user limits\n• Extend duration\n• View channel stats\n• Delete channel early",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🔧 Admin Commands",
+        value="`!echonetsetup` - Initial setup\n`!echonetdiagnose` - Check permissions\n`!echonetstats` - View statistics\n`!voice` - Create/refresh menu\n`!help` - Show help guide",
+        inline=False
+    )
+    
+    embed.set_footer(text="Need more help? Use !help for detailed guides!")
+    await ctx.send(embed=embed)
+
 @bot.command(name="help")
 async def help_command(ctx):
-    embed = discord.Embed(
-        title="🎤 EchoNet Voice Channel Bot",
-        description="Create and manage temporary voice channels!",
-        color=0x00ff00
-    )
-    embed.add_field(
-        name="👤 User Commands",
-        value="`!voice` - Set up the main menu\\n`!help` - Show this help message",
-        inline=False
-    )
-    embed.add_field(
-        name="👑 Admin Commands",
-        value="`!echonetsetup` - Initial bot setup\\n`!echonetdiagnose` - Check permissions\\n`!echonetstats` - Show statistics",
-        inline=False
-    )
-    embed.add_field(
-        name="✨ Features",
-        value="• Create temporary voice channels\\n• Set custom duration (1-60 days)\\n• Choose access type (Open/Request Only)\\n• Full channel management\\n• User blocking system\\n• Ownership transfer",
-        inline=False
-    )
-    embed.add_field(
-        name="🔧 Setup Instructions",
-        value="1. Run `!echonetsetup` to configure the bot\\n2. Run `!voice` to create the main menu\\n3. Users can now create channels!",
-        inline=False
-    )
-    embed.set_footer(text="EchoNet Bot - Making voice channels easy!")
+    # Check if user is admin to show appropriate help
+    is_admin = ctx.author.guild_permissions.manage_channels
+    
+    if is_admin and not ctx.message.content.endswith(" user"):
+        # Show admin help by default for admins
+        embed = discord.Embed(
+            title="🎤 EchoNet Voice Channel Bot - Admin Guide",
+            description="**Welcome to EchoNet!** Here's everything you need to know to set up and manage the bot.",
+            color=0x00ff00
+        )
+        
+        embed.add_field(
+            name="🚀 Initial Setup (Required)",
+            value="**Step 1:** Run `!echonetsetup`\n• Bot will ask for category names and text channel name\n• Creates categories and channels automatically\n• Sets up proper permissions\n\n**Step 2:** Run `!voice`\n• Creates the interactive menu in your text channel\n• Users can now start creating channels!",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="👑 Admin Commands",
+            value="`!echonetsetup` - Initial bot setup (run this first!)\n`!echonetdiagnose` - Check bot permissions\n`!echonetstats` - View server statistics\n`!help user` - Show user help guide",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🔧 Bot Permissions Required",
+            value="**Essential permissions:**\n• Manage Channels (create/delete channels)\n• Send Messages & Embed Links\n• Read Message History\n• Manage Messages (keep menu clean)\n• View Channels",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🎯 What EchoNet Does",
+            value="• **Creates temporary voice channels** with custom durations\n• **Automatic cleanup** - channels expire and are deleted\n• **Access control** - open or request-only channels\n• **Channel management** - kick, block, transfer ownership\n• **Clean interface** - interactive buttons in your text channel",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🛠️ Troubleshooting",
+            value="**Common issues:**\n• `!echonetdiagnose` - checks permissions\n• If setup fails, check bot has Manage Channels permission\n• If menu disappears, run `!voice` again\n• Users need 'Connect' permission for voice channels",
+            inline=False
+        )
+        
+        embed.set_footer(text="EchoNet Bot - Need user help? Use !help user")
+    else:
+        # Show user help
+        embed = discord.Embed(
+            title="🎤 EchoNet Voice Channel Bot - User Guide",
+            description="Create your own temporary voice channels with custom settings!",
+            color=0x3498db
+        )
+        
+        embed.add_field(
+            name="🎮 How to Get Started",
+            value="1. **Find the menu** - Look for the EchoNet menu in your server\n2. **Click 'Create Voice Channel'** - Green button to start\n3. **Choose settings** - Pick duration and access type\n4. **Manage your channel** - Use the management buttons",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="⚙️ Channel Settings",
+            value="**Duration:** 1 day to 2 months\n**Access Types:**\n• 🌐 **Open** - Anyone can join\n• 🔒 **Request Only** - Users must request access\n\n**User Limits:** Set max number of users (0-99)",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🛠️ Managing Your Channel",
+            value="**Owner Controls:**\n• Kick/invite users\n• Block/unblock users\n• Transfer ownership\n• Change access type\n• Extend duration\n• Set user limits\n• Delete channel early",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🔐 Joining Private Channels",
+            value="**For Request-Only channels:**\n1. Click '🔐 Join [Channel Name]' button\n2. Wait for owner approval\n3. You'll get a DM when approved/denied\n\n**Note:** Channel owners get DM notifications for requests",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="👤 User Commands",
+            value="`!voice` - Open the main menu\n`!help` - Show this help message",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="💡 Tips",
+            value="• Channels automatically delete when they expire\n• You can extend duration before expiration\n• Blocked users can't see or join your channel\n• Only channel owners can manage settings",
+            inline=False
+        )
+        
+        embed.set_footer(text="EchoNet Bot - Making voice channels easy!")
+    
     await ctx.send(embed=embed)
 
 if __name__ == "__main__":
