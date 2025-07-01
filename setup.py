@@ -259,4 +259,3 @@ async def diagnose_permissions(ctx):
     )
 
     await ctx.send(embed=embed)
-    
