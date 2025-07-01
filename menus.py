@@ -664,7 +664,7 @@ class BlockUserModal(discord.ui.Modal, title="Block User"):
         if user_input.startswith('<@') and user_input.endswith('>'):
             user_id = int(user_input[2:-1].replace('!', ''))
         else:
-            try:
+            try```python
                 user_id = int(user_input)
             except ValueError:
                 await interaction.response.send_message("❌ Invalid user ID or mention.", ephemeral=True)
