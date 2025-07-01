@@ -11,7 +11,7 @@ class MainMenu(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Create Voice Channel", style=discord.ButtonStyle.green, emoji="🎤")
+    @discord.ui.button(label="Create Voice Channel", style=discord.ButtonStyle.green, emoji="🎤", custom_id="mainmenu_create")
     async def create_voice_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
         settings = load_settings()
         guild_id = str(interaction.guild.id)
@@ -425,12 +425,12 @@ class ApproveDenyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, emoji="✅")
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, emoji="✅", custom_id="approve_request")
     async def approve_request(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Implementation for approving requests
         await interaction.response.send_message("Request approved!", ephemeral=True)
 
-    @discord.ui.button(label="Deny", style=discord.ButtonStyle.red, emoji="❌")
+    @discord.ui.button(label="Deny", style=discord.ButtonStyle.red, emoji="❌", custom_id="deny_request")
     async def deny_request(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Implementation for denying requests
         await interaction.response.send_message("Request denied!", ephemeral=True)
