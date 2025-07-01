@@ -28,5 +28,15 @@
     "menu_channel_id": null,
     "blocked_users": [],
     "user_limit": null
+  },
+  "1389468556378247169": {
+    "owner_id": 508294038445752320,
+    "expires_at": "2025-07-02T04:51:59.517941",
+    "request_only": true,
+    "pending_requests": [],
+    "menu_message_id": null,
+    "menu_channel_id": null,
+    "blocked_users": [],
+    "user_limit": null
   }
 }
