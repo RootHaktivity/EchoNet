@@ -1,1 +1,11 @@
-{}
+{
+  "1389463157432647741": {
+    "owner_id": 508294038445752320,
+    "expires_at": "2025-07-02T04:30:32.450546",
+    "request_only": true,
+    "pending_requests": [],
+    "menu_message_id": null,
+    "menu_channel_id": null,
+    "blocked_users": []
+  }
+}
