@@ -52,6 +52,23 @@ def save_temp_channels(temp_channels):
             "menu_channel_id": info.get("menu_channel_id"),
             "blocked_users": info.get("blocked_users", [])
         }
+    
+    with open(CHANNELS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+def save_temp_channels(temp_channels):
+    """Save temporary channel data to JSON file."""
+    data = {}
+    for channel_id, info in temp_channels.items():
+        data[str(channel_id)] = {
+            "owner_id": info["owner_id"],
+            "expires_at": info["expires_at"].isoformat(),
+            "request_only": info["request_only"],
+            "pending_requests": info.get("pending_requests", []),
+            "menu_message_id": info.get("menu_message_id"),
+            "menu_channel_id": info.get("menu_channel_id"),
+            "blocked_users": info.get("blocked_users", [])
+        }
     with open(CHANNELS_FILE, "w") as f:
         json.dump(data, f, indent=2)
 

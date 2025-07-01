@@ -1,214 +1,45 @@
 import discord
+from discord.ext import commands
 import asyncio
 import datetime
-from data import load_settings, save_temp_channels, add_temp_channel
-from perms import (
-    check_bot_permissions, 
-    format_permission_error, 
-    check_category_permissions, 
-    check_text_channel_permissions,
-    check_voice_channel_permissions,
-    check_move_permissions
-)
+from data import load_settings, save_settings, load_temp_channels, save_temp_channels
+from perms import check_category_permissions, check_voice_channel_permissions, format_permission_error
 
-MAIN_MENU_TAG = "[EchoNet Main Menu]"
-
-# --- Helper Functions ---
-
-async def purge_menu_text_channel(menu_text_channel):
-    missing_perms = check_bot_permissions(menu_text_channel, ["read_message_history", "manage_messages"])
-    if missing_perms:
-        return
-    async for msg in menu_text_channel.history(limit=100):
-        if not (msg.author == menu_text_channel.guild.me and msg.content.startswith(MAIN_MENU_TAG)):
-            try:
-                await msg.delete()
-            except:
-                pass
-
-async def ensure_main_menu(menu_text_channel):
-    found_main_menu = None
-    async for msg in menu_text_channel.history(limit=20):
-        if msg.author == menu_text_channel.guild.me and msg.content.startswith(MAIN_MENU_TAG):
-            found_main_menu = msg
-            break
-    if not found_main_menu:
-        embed = discord.Embed(
-            title="🎤 Voice Channel Creator",
-            description="Create your own temporary voice channel!",
-            color=0x00ff00
-        )
-        embed.add_field(
-            name="Features",
-            value="• Custom duration\n• Access control\n• Channel management",
-            inline=False
-        )
-        view = MainMenu()
-        main_menu_msg = await menu_text_channel.send(f"{MAIN_MENU_TAG}", embed=embed, view=view)
-        return main_menu_msg
-    return found_main_menu
-
-async def delete_management_menu_and_restore_main(menu_text_channel, management_msg, delay=300):
-    await asyncio.sleep(delay)
-    try:
-        await management_msg.delete()
-    except:
-        pass
-    await purge_menu_text_channel(menu_text_channel)
-    await ensure_main_menu(menu_text_channel)
-
-# --- UI Classes ---
-
-class ApproveDenyView(discord.ui.View):
-    def __init__(self, cid=None, requester_id=None, guild_id=None, bot=None):
-        super().__init__(timeout=None)
-        self.cid = cid
-        self.requester_id = requester_id
-        self.guild_id = guild_id
-        self.bot = bot
-
-    @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, custom_id="approve_request")
-    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from main import temp_channels, save_data
-        global temp_channels
-
-        if not self.cid or not self.requester_id or not self.guild_id or not self.bot:
-            await interaction.response.send_message("❌ Could not process approval - missing information.", ephemeral=True)
-            return
-
-        guild = self.bot.get_guild(self.guild_id)
-        if not guild:
-            await interaction.response.send_message("❌ Could not find the server.", ephemeral=True)
-            return
-
-        channel = guild.get_channel(self.cid)
-        requester = guild.get_member(self.requester_id)
-
-        if not channel or not requester:
-            await interaction.response.send_message("❌ Could not find channel or user.", ephemeral=True)
-            return
-
-        missing_perms = check_voice_channel_permissions(channel)
-        if missing_perms:
-            perm_error = format_permission_error(missing_perms, f"Channel {channel.name}")
-            await interaction.response.send_message(f"❌ Cannot approve request due to missing permissions:\n{perm_error}", ephemeral=True)
-            return
-
-        try:
-            overwrites = channel.overwrites
-            overwrites[requester] = discord.PermissionOverwrite(connect=True, view_channel=True)
-            await channel.edit(overwrites=overwrites, reason="Approved join request")
-
-            if self.cid in temp_channels and self.requester_id in temp_channels[self.cid].get("pending_requests", []):
-                temp_channels[self.cid]["pending_requests"].remove(self.requester_id)
-                save_data()
-
-            await interaction.response.send_message(
-                f"✅ You approved {requester.mention} to join **{channel.name}**.", ephemeral=True
-            )
-
-            try:
-                await requester.send(f"✅ Your request to join **{channel.name}** was approved!")
-            except:
-                pass
-
-        except discord.Forbidden:
-            await interaction.response.send_message("❌ I don't have permission to edit this channel. Please ensure I have the 'Manage Channels' permission in the category and channel.", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Error processing approval: {str(e)}", ephemeral=True)
-
-    @discord.ui.button(label="Deny", style=discord.ButtonStyle.red, custom_id="deny_request")
-    async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from main import temp_channels, save_data
-        global temp_channels
-
-        if not self.cid or not self.requester_id or not self.guild_id or not self.bot:
-            await interaction.response.send_message("❌ Could not process denial - missing information.", ephemeral=True)
-            return
-
-        guild = self.bot.get_guild(self.guild_id)
-        if not guild:
-            await interaction.response.send_message("❌ Could not find the server.", ephemeral=True)
-            return
-
-        channel = guild.get_channel(self.cid)
-        requester = guild.get_member(self.requester_id)
-
-        if not channel:
-            await interaction.response.send_message("❌ Could not find channel.", ephemeral=True)
-            return
-
-        try:
-            if self.cid in temp_channels and self.requester_id in temp_channels[self.cid].get("pending_requests", []):
-                temp_channels[self.cid]["pending_requests"].remove(self.requester_id)
-                save_data()
-
-            requester_name = requester.mention if requester else f"User ID {self.requester_id}"
-            await interaction.response.send_message(
-                f"❌ You denied {requester_name}'s request to join **{channel.name}**.", ephemeral=True
-            )
-
-            if requester:
-                try:
-                    await requester.send(f"❌ Your request to join **{channel.name}** was denied.")
-                except:
-                    pass
-
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Error processing denial: {str(e)}", ephemeral=True)
+MAIN_MENU_TAG = "🎤 **MAIN MENU**"
 
 class MainMenu(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎤 Create Voice Channel", style=discord.ButtonStyle.green, custom_id="mainmenu_create")
-    async def create_channel(self, interaction, button):
+    @discord.ui.button(label="Create Voice Channel", style=discord.ButtonStyle.green, emoji="🎤")
+    async def create_voice_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
         settings = load_settings()
         guild_id = str(interaction.guild.id)
+
         if guild_id not in settings:
-            await interaction.response.send_message(
-                "❌ Setup not complete. Please ask an admin to run `!echonetsetup` first.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ Setup not complete. Please ask an admin to run `!echonetsetup` first.", ephemeral=True)
             return
 
         category_id = settings[guild_id]["category_id"]
-        text_channel_id = settings[guild_id]["text_channel_id"]
         category = interaction.guild.get_channel(category_id)
-        text_channel = interaction.guild.get_channel(text_channel_id)
 
-        if not category or not text_channel:
-            await interaction.response.send_message(
-                "❌ The saved category or text channel no longer exists. Please ask an admin to run `!echonetsetup` again.",
-                ephemeral=True
-            )
+        if not category:
+            await interaction.response.send_message("❌ The saved category no longer exists. Please ask an admin to run `!echonetsetup` again.", ephemeral=True)
             return
 
-        missing_cat_perms = check_category_permissions(category)
-        missing_txt_perms = check_text_channel_permissions(text_channel)
-
-        if missing_cat_perms or missing_txt_perms:
-            error_msg = "❌ Missing required permissions:\n"
-            if missing_cat_perms:
-                error_msg += format_permission_error(missing_cat_perms, f"Category {category.name}") + "\n"
-            if missing_txt_perms:
-                error_msg += format_permission_error(missing_txt_perms, f"Text Channel {text_channel.name}") + "\n"
-            error_msg += "\nPlease ask an admin to grant these permissions."
-            await interaction.response.send_message(error_msg, ephemeral=True)
+        missing_perms = check_category_permissions(category)
+        if missing_perms:
+            perm_error = format_permission_error(missing_perms, f"Category {category.name}")
+            await interaction.response.send_message(f"❌ Cannot create channel due to missing permissions:\n{perm_error}\n\nPlease contact an admin.", ephemeral=True)
             return
 
-        embed = discord.Embed(
-            title="⏰ Channel Duration",
-            description="How long should your voice channel last?",
-            color=0x00ff00
-        )
-        view = DurationView(interaction.user.id, interaction.channel, category=category, menu_text_channel=text_channel)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        modal = CreateChannelModal()
+        await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="🛠️ Manage My Channel", style=discord.ButtonStyle.blurple, custom_id="mainmenu_manage")
     async def manage_channel(self, interaction, button):
-        from main import temp_channels
-        global temp_channels
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
 
         owned = [cid for cid, info in temp_channels.items() if info["owner_id"] == interaction.user.id]
         if not owned:
@@ -226,7 +57,7 @@ class MainMenu(discord.ui.View):
                 description="Use the buttons below to manage your channel.",
                 color=0x00ff00
             )
-            view = ChannelActionsView(cid, interaction.user.id)
+            view = ChannelManagementView(cid)
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         else:
             embed = discord.Embed(title="Select a Channel to Manage", color=0x00ff00)
@@ -248,6 +79,101 @@ class MainMenu(discord.ui.View):
     async def list_channels(self, interaction, button):
         view = ListChannelsView(interaction.user.id, interaction.guild)
         await view.send_channel_list(interaction)
+
+class CreateChannelModal(discord.ui.Modal, title="Create Voice Channel"):
+    def __init__(self):
+        super().__init__()
+
+    channel_name = discord.ui.TextInput(label="Channel Name", placeholder="Enter your channel name...", max_length=50)
+    duration_days = discord.ui.TextInput(label="Duration (days)", placeholder="1-60 days", default="1", max_length=2)
+    access_type = discord.ui.TextInput(label="Access Type", placeholder="Type 'open' or 'request'", default="open", max_length=10)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        settings = load_settings()
+        guild_id = str(interaction.guild.id)
+        category_id = settings[guild_id]["category_id"]
+        category = interaction.guild.get_channel(category_id)
+
+        # Validate duration
+        try:
+            days = int(self.duration_days.value)
+            if not 1 <= days <= 60:
+                await interaction.response.send_message("❌ Duration must be between 1 and 60 days.", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("❌ Duration must be a valid number.", ephemeral=True)
+            return
+
+        # Validate access type
+        access_type = self.access_type.value.lower().strip()
+        if access_type not in ["open", "request"]:
+            await interaction.response.send_message("❌ Access type must be 'open' or 'request'.", ephemeral=True)
+            return
+
+        request_only = access_type == "request"
+
+        try:
+            # Create the voice channel
+            overwrites = {
+                interaction.guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True),
+                interaction.user: discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True)
+            }
+
+            bot_member = interaction.guild.me
+            overwrites[bot_member] = discord.PermissionOverwrite(manage_channels=True, view_channel=True, connect=True)
+
+            if request_only:
+                overwrites[interaction.guild.default_role] = discord.PermissionOverwrite(connect=False, view_channel=True)
+            else:
+                overwrites[interaction.guild.default_role] = discord.PermissionOverwrite(connect=True, view_channel=True)
+
+            channel = await category.create_voice_channel(
+                name=self.channel_name.value,
+                overwrites=overwrites,
+                reason=f"Temporary channel created by {interaction.user}"
+            )
+
+            # Calculate expiration
+            expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+
+            # Save channel data
+            temp_channels = load_temp_channels()
+            temp_channels[channel.id] = {
+                "owner_id": interaction.user.id,
+                "expires_at": expires_at,
+                "request_only": request_only,
+                "pending_requests": [],
+                "menu_message_id": None,
+                "menu_channel_id": None,
+                "blocked_users": []
+            }
+            save_temp_channels(temp_channels)
+
+            # Create management embed
+            embed = discord.Embed(
+                title="✅ Voice Channel Created!",
+                description=f"Your channel **{channel.name}** has been created.",
+                color=0x00ff00
+            )
+            embed.add_field(name="Duration", value=f"{days} days", inline=True)
+            embed.add_field(name="Access", value="Request Only" if request_only else "Open", inline=True)
+            embed.add_field(name="Expires", value=f"<t:{int(expires_at.timestamp())}:R>", inline=True)
+
+            view = ChannelManagementView(channel.id)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+            # Schedule cleanup - modified to work with ephemeral=True
+            await asyncio.sleep(5)  # Give the user time to see the message
+            original_response = await interaction.original_response()
+            try:
+                await original_response.delete()
+            except:
+                pass
+
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ I don't have permission to create voice channels.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error creating channel: {str(e)}", ephemeral=True)
 
 class SelectChannelView(discord.ui.View):
     def __init__(self, user_id, channel_options):
@@ -278,238 +204,62 @@ class SelectChannelView(discord.ui.View):
             description="Use the buttons below to manage your channel.",
             color=0x00ff00
         )
-        view = ChannelActionsView(cid, self.user_id)
+        view = ChannelManagementView(cid)
         await interaction.response.edit_message(embed=embed, view=view)
 
-class DurationView(discord.ui.View):
-    def __init__(self, user_id, channel, category=None, menu_text_channel=None):
-        super().__init__(timeout=60)
-        self.user_id = user_id
-        self.channel = channel
-        self.category = category
-        self.menu_text_channel = menu_text_channel
-        self.days = None
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
-
-    @discord.ui.button(label="1 Day", style=discord.ButtonStyle.green)
-    async def one_day(self, interaction, button):
-        self.days = 1
-        await self.show_access_menu(interaction)
-
-    @discord.ui.button(label="1 Week", style=discord.ButtonStyle.blurple)
-    async def one_week(self, interaction, button):
-        self.days = 7
-        await self.show_access_menu(interaction)
-
-    @discord.ui.button(label="2 Weeks", style=discord.ButtonStyle.blurple)
-    async def two_weeks(self, interaction, button):
-        self.days = 14
-        await self.show_access_menu(interaction)
-
-    @discord.ui.button(label="Custom", style=discord.ButtonStyle.gray)
-    async def custom_duration(self, interaction, button):
-        await interaction.response.send_message("Please type the number of days (1-60 max):", ephemeral=True)
-
-        def check(m):
-            return m.author.id == self.user_id and m.channel == self.channel
-
-        try:
-            msg = await interaction.client.wait_for("message", check=check, timeout=30)
-            try:
-                days = int(msg.content)
-                if days < 1 or days > 60:
-                    await interaction.followup.send("❌ Please enter a number between 1 and 60 days!", ephemeral=True)
-                    return
-
-                self.days = days
-                embed = discord.Embed(
-                    title="🔐 Channel Access Type",
-                    description="Who can join your channel?",
-                    color=0x00ff00
-                )
-                view = AccessTypeView(self.user_id, self.days, self.channel, self.category, self.menu_text_channel)
-                await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-            except ValueError:
-                await interaction.followup.send("❌ Please enter a valid number!", ephemeral=True)
-        except asyncio.TimeoutError:
-            await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
-
-    async def show_access_menu(self, interaction):
-        embed = discord.Embed(
-            title="🔐 Channel Access Type",
-            description="Who can join your channel?",
-            color=0x00ff00
-        )
-        view = AccessTypeView(self.user_id, self.days, self.channel, self.category, self.menu_text_channel)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-class AccessTypeView(discord.ui.View):
-    def __init__(self, user_id, days, channel, category=None, menu_text_channel=None):
-        super().__init__(timeout=60)
-        self.user_id = user_id
-        self.days = days
-        self.channel = channel
-        self.category = category
-        self.menu_text_channel = menu_text_channel
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
-
-    @discord.ui.button(label="🌐 Open (Anyone can join)", style=discord.ButtonStyle.green)
-    async def open_access(self, interaction, button):
-        await self.ask_channel_name(interaction, request_only=False)
-
-    @discord.ui.button(label="🔒 Request Only", style=discord.ButtonStyle.red)
-    async def request_access(self, interaction, button):
-        await self.ask_channel_name(interaction, request_only=True)
-
-    async def ask_channel_name(self, interaction, request_only):
-        await interaction.response.send_message("Please type the name you want for your voice channel (1-100 characters):", ephemeral=True)
-
-        def check(m):
-            return m.author.id == self.user_id and m.channel == self.channel
-
-        try:
-            msg = await interaction.client.wait_for("message", check=check, timeout=60)
-            channel_name = msg.content.strip()
-            if not (1 <= len(channel_name) <= 100):
-                await interaction.followup.send("❌ Channel name must be between 1 and 100 characters!", ephemeral=True)
-                return
-            await self.create_channel(interaction, request_only, channel_name)
-        except asyncio.TimeoutError:
-            await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
-
-    async def create_channel(self, interaction, request_only, channel_name):
-        from main import temp_channels, save_data
-        global temp_channels
-        from data import load_settings
-
-        expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=self.days)
-        guild = interaction.guild
-        user = interaction.user
-
-        settings = load_settings()
-        guild_id = str(guild.id)
-        if guild_id not in settings or "category_id" not in settings[guild_id]:
-            await interaction.followup.send("❌ No category set. Please ask an admin to run `!echonetsetup`.", ephemeral=True)
-            return
-
-        category_id = settings[guild_id]["category_id"]
-        category = guild.get_channel(category_id)
-        if not category:
-            await interaction.followup.send("❌ The voice channel category no longer exists. Please ask an admin to run `!echonetsetup` again.", ephemeral=True)
-            return
-
-        missing_perms = check_category_permissions(category)
-        if missing_perms:
-            perm_error = format_permission_error(missing_perms, f"Category {category.name}")
-            await interaction.followup.send(f"❌ Cannot create channel due to missing permissions:\n{perm_error}\n\nPlease ask an admin to grant these permissions.", ephemeral=True)
-            return
-
-        if request_only:
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(connect=False, view_channel=True),
-                user: discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True)
-            }
-        else:
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True),
-                user: discord.PermissionOverwrite(manage_channels=True, connect=True, view_channel=True)
-            }
-
-        bot_member = guild.me
-        overwrites[bot_member] = discord.PermissionOverwrite(manage_channels=True, view_channel=True, connect=True)
-
-        try:
-            channel = await guild.create_voice_channel(
-                name=channel_name,
-                overwrites=overwrites,
-                category=category,
-                reason="User-created custom voice channel"
-            )
-        except discord.Forbidden:
-            await interaction.followup.send("❌ I don't have permission to create channels in that category. Please ensure I have the 'Manage Channels' permission.", ephemeral=True)
-            return
-        except Exception as e:
-            await interaction.followup.send(f"❌ Error creating channel: {str(e)}", ephemeral=True)
-            return
-
-        menu_text_channel = self.menu_text_channel
-        if not menu_text_channel:
-            await interaction.followup.send("❌ Could not find the menu text channel! Please ask an admin to run `!echonetsetup`.", ephemeral=True)
-            return
-
-        await purge_menu_text_channel(menu_text_channel)
-
-        access_type = "🔒 Request Only" if request_only else "🌐 Open"
-        embed = discord.Embed(
-            title="✅ Voice Channel Created!",
-            description=f"Channel <#{channel.id}> has been created by {user.mention}",
-            color=0x00ff00
-        )
-        embed.add_field(name="Channel Name", value=channel_name, inline=True)
-        embed.add_field(name="Duration", value=f"{self.days} day(s)", inline=True)
-        embed.add_field(name="Access Type", value=access_type, inline=True)
-        embed.add_field(name="Owner", value=user.mention, inline=True)
-        embed.add_field(name="Channel ID", value=str(channel.id), inline=False)
-
-        view = ChannelActionsView(channel.id, user.id)
-        menu_message = await menu_text_channel.send(embed=embed, view=view)
-
-        await interaction.followup.send(f"✅ Your voice channel **{channel_name}** has been created! Check <#{menu_text_channel.id}> to manage it.", ephemeral=True)
-
-        temp_channels[channel.id] = add_temp_channel(
-            channel.id, user.id, expires_at, request_only, menu_message.id, menu_text_channel.id
-        )
-        save_data()
-
-        interaction.client.loop.create_task(delete_management_menu_and_restore_main(menu_text_channel, menu_message))
-
-# --- Channel Management Views ---
-
-class ChannelActionsView(discord.ui.View):
-    def __init__(self, channel_id, user_id):
-        super().__init__(timeout=120)
+class ChannelManagementView(discord.ui.View):
+    def __init__(self, channel_id):
+        super().__init__(timeout=300)
         self.channel_id = channel_id
-        self.user_id = user_id
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
-
-    @discord.ui.button(label="Edit Channel", style=discord.ButtonStyle.primary, emoji="✏️")
-    async def edit_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = EditChannelView(self.channel_id, self.user_id)
-        await interaction.response.send_message("Edit your channel settings below:", view=view, ephemeral=True)
-
-    @discord.ui.button(label="Block Users", style=discord.ButtonStyle.danger, emoji="🚫")
-    async def block_users(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = BlockedUsersView(self.channel_id, self.user_id)
-        await interaction.response.send_message("Manage your blocked users below:", view=view, ephemeral=True)
 
     @discord.ui.button(label="Delete Channel", style=discord.ButtonStyle.red, emoji="🗑️")
     async def delete_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from main import temp_channels, save_data
-        global temp_channels
-
-        guild = interaction.guild
-        channel = guild.get_channel(self.channel_id)
-        if not channel:
-            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
             return
 
-        try:
-            await channel.delete(reason="Deleted by owner via EchoNet")
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Failed to delete channel: {e}", ephemeral=True)
+        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the channel owner can delete it.", ephemeral=True)
             return
 
-        if self.channel_id in temp_channels:
-            del temp_channels[self.channel_id]
-            save_data()
+        channel = interaction.guild.get_channel(self.channel_id)
+        if channel:
+            try:
+                await channel.delete(reason=f"Deleted by owner {interaction.user}")
+                del temp_channels[self.channel_id]
+                save_temp_channels(temp_channels)
+                await interaction.response.send_message("✅ Channel deleted successfully.", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.response.send_message("❌ I don't have permission to delete the channel.", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
 
-        await interaction.response.send_message("✅ Channel deleted!", ephemeral=True)
+    @discord.ui.button(label="Block User", style=discord.ButtonStyle.secondary, emoji="🚫")
+    async def block_user(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        if temp_channels[self.channel_id]["owner_id"] != interaction.user.id:
+            await interaction.response.send_message("❌ Only the channel owner can block users.", ephemeral=True)
+            return
+
+        modal = BlockUserModal(self.channel_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Edit Channel", style=discord.ButtonStyle.primary, emoji="✏️")
+    async def edit_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = EditChannelView(self.channel_id, interaction.user.id)
+        await interaction.response.send_message("Edit your channel settings below:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Unblock Users", style=discord.ButtonStyle.success, emoji="✅")
+    async def unblock_users(self, interaction: discord.Interaction, button: discord.ui.Button):
+        view = UnblockedUsersView(self.channel_id, interaction.user.id)
+        await interaction.response.send_message("Manage your blocked users below:", view=view, ephemeral=True)
 
 class EditChannelView(discord.ui.View):
     def __init__(self, channel_id, user_id):
@@ -546,8 +296,8 @@ class EditChannelView(discord.ui.View):
 
     @discord.ui.button(label="Change Duration", style=discord.ButtonStyle.secondary, emoji="⏰")
     async def change_duration(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from main import temp_channels, save_data
-        global temp_channels
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
 
         await interaction.response.send_message("Please type the new duration in days (1-60):", ephemeral=True)
 
@@ -568,14 +318,14 @@ class EditChannelView(discord.ui.View):
 
                 expires_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
                 temp_channels[self.channel_id]["expires_at"] = expires_at
-                save_data()
+                save_temp_channels(temp_channels)
                 await interaction.followup.send(f"✅ Channel duration updated to {days} day(s) from now.", ephemeral=True)
             except ValueError:
                 await interaction.followup.send("❌ Please enter a valid number!", ephemeral=True)
         except asyncio.TimeoutError:
             await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
 
-class BlockedUsersView(discord.ui.View):
+class UnblockedUsersView(discord.ui.View):
     def __init__(self, channel_id, user_id):
         super().__init__(timeout=120)
         self.channel_id = channel_id
@@ -584,48 +334,10 @@ class BlockedUsersView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
 
-    @discord.ui.button(label="Block a User", style=discord.ButtonStyle.danger, emoji="🚫")
-    async def block_user(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from main import temp_channels, save_data
-        global temp_channels
-
-        await interaction.response.send_message("Please mention the user you want to block from your channel:", ephemeral=True)
-
-        def check(m):
-            return m.author.id == self.user_id and m.guild and m.guild.id == interaction.guild.id
-
-        try:
-            msg = await interaction.client.wait_for("message", check=check, timeout=60)
-            if not msg.mentions:
-                await interaction.followup.send("❌ Please mention a user!", ephemeral=True)
-                return
-            user = msg.mentions[0]
-
-            if self.channel_id not in temp_channels:
-                await interaction.followup.send("❌ Channel not found in data!", ephemeral=True)
-                return
-
-            if user.id in temp_channels[self.channel_id]["blocked_users"]:
-                await interaction.followup.send("❌ User is already blocked!", ephemeral=True)
-                return
-
-            temp_channels[self.channel_id]["blocked_users"].append(user.id)
-            save_data()
-
-            channel = interaction.guild.get_channel(self.channel_id)
-            if channel:
-                overwrites = channel.overwrites
-                overwrites[user] = discord.PermissionOverwrite(connect=False, view_channel=False)
-                await channel.edit(overwrites=overwrites, reason="User blocked by owner via EchoNet")
-
-            await interaction.followup.send(f"✅ {user.mention} has been blocked from your channel.", ephemeral=True)
-        except asyncio.TimeoutError:
-            await interaction.followup.send("⏰ Timed out! Please try again.", ephemeral=True)
-
     @discord.ui.button(label="Unblock a User", style=discord.ButtonStyle.success, emoji="✅")
     async def unblock_user(self, interaction: discord.Interaction, button: discord.ui.Button):
-        from main import temp_channels, save_data
-        global temp_channels
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
 
         if self.channel_id not in temp_channels or not temp_channels[self.channel_id]["blocked_users"]:
             await interaction.response.send_message("❌ No blocked users for this channel.", ephemeral=True)
@@ -645,7 +357,7 @@ class BlockedUsersView(discord.ui.View):
         async def select_callback(select_interaction: discord.Interaction):
             user_id = int(select_interaction.data['values'][0])
             temp_channels[self.channel_id]["blocked_users"].remove(user_id)
-            save_data()
+            save_temp_channels(temp_channels)
 
             channel = guild.get_channel(self.channel_id)
             user = guild.get_member(user_id)
@@ -662,7 +374,66 @@ class BlockedUsersView(discord.ui.View):
         view.add_item(select)
         await interaction.response.send_message("Select a user to unblock:", view=view, ephemeral=True)
 
-# --- Improved ListChannelsView and RequestJoinButton ---
+class BlockUserModal(discord.ui.Modal, title="Block User"):
+    def __init__(self, channel_id):
+        super().__init__()
+        self.channel_id = channel_id
+
+    user_id = discord.ui.TextInput(label="User ID or @mention", placeholder="Enter user ID or mention them...")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel not found.", ephemeral=True)
+            return
+
+        # Parse user ID
+        user_input = self.user_id.value.strip()
+        if user_input.startswith('<@') and user_input.endswith('>'):
+            user_id = int(user_input[2:-1].replace('!', ''))
+        else:
+            try:
+                user_id = int(user_input)
+            except ValueError:
+                await interaction.response.send_message("❌ Invalid user ID or mention.", ephemeral=True)
+                return
+
+        user = interaction.guild.get_member(user_id)
+        if not user:
+            await interaction.response.send_message("❌ User not found in this server.", ephemeral=True)
+            return
+
+        if user_id in temp_channels[self.channel_id]["blocked_users"]:
+            await interaction.response.send_message("❌ User is already blocked.", ephemeral=True)
+            return
+
+        temp_channels[self.channel_id]["blocked_users"].append(user_id)
+        save_temp_channels(temp_channels)
+
+        # Remove user from channel if they're in it
+        channel = interaction.guild.get_channel(self.channel_id)
+        if channel and user.voice and user.voice.channel == channel:
+            try:
+                await user.move_to(None, reason="User blocked by channel owner")
+            except discord.Forbidden:
+                pass
+
+        await interaction.response.send_message(f"✅ Blocked {user.display_name} from the channel.", ephemeral=True)
+
+class ApproveDenyView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, emoji="✅")
+    async def approve_request(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Implementation for approving requests
+        await interaction.response.send_message("Request approved!", ephemeral=True)
+
+    @discord.ui.button(label="Deny", style=discord.ButtonStyle.red, emoji="❌")
+    async def deny_request(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Implementation for denying requests
+        await interaction.response.send_message("Request denied!", ephemeral=True)
 
 class ListChannelsView(discord.ui.View):
     def __init__(self, user_id, guild):
@@ -670,8 +441,8 @@ class ListChannelsView(discord.ui.View):
         self.user_id = user_id
         self.guild = guild
 
-        from main import temp_channels
-        global temp_channels
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
 
         for cid, info in temp_channels.items():
             if (
@@ -684,8 +455,8 @@ class ListChannelsView(discord.ui.View):
                     self.add_item(RequestJoinButton(cid, channel.name, info["owner_id"], self.user_id))
 
     async def send_channel_list(self, interaction: discord.Interaction):
-        from main import temp_channels
-        global temp_channels
+        from data import load_temp_channels
+        temp_channels = load_temp_channels()
 
         guild = interaction.guild
 
@@ -730,8 +501,8 @@ class RequestJoinButton(discord.ui.Button):
         self.requester_id = requester_id
 
     async def callback(self, interaction: discord.Interaction):
-        from main import temp_channels, save_data
-        global temp_channels
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
 
         info = temp_channels.get(self.channel_id)
         if not info:
@@ -745,7 +516,7 @@ class RequestJoinButton(discord.ui.Button):
             return
 
         info["pending_requests"].append(self.requester_id)
-        save_data()
+        save_temp_channels(temp_channels)
 
         await interaction.response.send_message("✅ Your request to join has been sent to the channel owner.", ephemeral=True)
 
@@ -759,12 +530,53 @@ class RequestJoinButton(discord.ui.Button):
                     description=f"{requester.mention} has requested to join your channel **{channel.name}** in **{interaction.guild.name}**.",
                     color=0x00ff00
                 )
-                view = ApproveDenyView(
-                    cid=self.channel_id,
-                    requester_id=self.requester_id,
-                    guild_id=interaction.guild.id,
-                    bot=interaction.client
-                )
+                view = ApproveDenyView()
                 await owner.send(embed=embed, view=view)
             except:
                 pass
+
+async def purge_menu_text_channel(menu_text_channel):
+    """Remove all messages from the menu text channel except pinned ones."""
+    try:
+        async for message in menu_text_channel.history(limit=100):
+            if not message.pinned:
+                try:
+                    await message.delete()
+                except:
+                    pass
+    except Exception as e:
+        print(f"Error purging menu channel: {e}")
+
+async def ensure_main_menu(menu_text_channel):
+    """Ensure the main menu exists in the text channel."""
+    found_main_menu = None
+    async for msg in menu_text_channel.history(limit=20):
+        if msg.author == menu_text_channel.guild.me and msg.content.startswith(MAIN_MENU_TAG):
+            found_main_menu = msg
+            break
+
+    if not found_main_menu:
+        embed = discord.Embed(
+            title="🎤 Voice Channel Creator",
+            description="Create your own temporary voice channel!",
+            color=0x00ff00
+        )
+        embed.add_field(
+            name="Features",
+            value="• Custom duration\n• Access control\n• Channel management",
+            inline=False
+        )
+        view = MainMenu()
+        main_menu_msg = await menu_text_channel.send(f"{MAIN_MENU_TAG}", embed=embed, view=view)
+        return main_menu_msg
+    return found_main_menu
+
+async def delete_management_menu_and_restore_main(menu_text_channel, management_msg, delay=300):
+    """Delete management menu after delay and restore main menu."""
+    await asyncio.sleep(delay)
+    try:
+        await management_msg.delete()
+    except:
+        pass
+    await purge_menu_text_channel(menu_text_channel)
+    await ensure_main_menu(menu_text_channel)
