@@ -143,7 +143,8 @@ async def setup_echonet(ctx, bot):
         if guild_id not in settings:
             settings[guild_id] = {}
 
-        settings[guild_id]["category_id"] = menu_category.id
+        settings[guild_id]["voice_category_id"] = voice_category.id
+        settings[guild_id]["menu_category_id"] = menu_category.id
         settings[guild_id]["text_channel_id"] = text_channel.id
         save_settings(settings)
 
@@ -180,29 +181,52 @@ async def diagnose_permissions(ctx):
         await ctx.send(embed=embed)
         return
 
-    category_id = settings[guild_id].get("category_id")
+    voice_category_id = settings[guild_id].get("voice_category_id", settings[guild_id].get("category_id"))
+    menu_category_id = settings[guild_id].get("menu_category_id")
     text_channel_id = settings[guild_id].get("text_channel_id")
 
-    category = ctx.guild.get_channel(category_id) if category_id else None
+    voice_category = ctx.guild.get_channel(voice_category_id) if voice_category_id else None
+    menu_category = ctx.guild.get_channel(menu_category_id) if menu_category_id else None
     text_channel = ctx.guild.get_channel(text_channel_id) if text_channel_id else None
 
-    if not category:
+    if not voice_category:
         embed.add_field(
-            name="❌ Category", 
-            value="Saved category no longer exists. Re-run `!echonetsetup`.", 
+            name="❌ Voice Category", 
+            value="Saved voice category no longer exists. Re-run `!echonetsetup`.", 
             inline=False
         )
     else:
-        missing_cat = check_category_permissions(category)
+        missing_cat = check_category_permissions(voice_category)
         if missing_cat:
             embed.add_field(
-                name=f"❌ Category: {category.name}", 
+                name=f"❌ Voice Category: {voice_category.name}", 
                 value=f"Missing: {', '.join(missing_cat)}", 
                 inline=False
             )
         else:
             embed.add_field(
-                name=f"✅ Category: {category.name}", 
+                name=f"✅ Voice Category: {voice_category.name}", 
+                value="All permissions OK", 
+                inline=False
+            )
+
+    if not menu_category:
+        embed.add_field(
+            name="❌ Menu Category", 
+            value="Saved menu category no longer exists. Re-run `!echonetsetup`.", 
+            inline=False
+        )
+    else:
+        missing_menu_cat = check_category_permissions(menu_category)
+        if missing_menu_cat:
+            embed.add_field(
+                name=f"❌ Menu Category: {menu_category.name}", 
+                value=f"Missing: {', '.join(missing_menu_cat)}", 
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name=f"✅ Menu Category: {menu_category.name}", 
                 value="All permissions OK", 
                 inline=False
             )
