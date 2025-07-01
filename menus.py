@@ -516,6 +516,86 @@ class BlockUserModal(discord.ui.Modal, title="Block User"):
 
         await interaction.response.send_message(f"✅ Blocked {user.display_name} from the channel.", ephemeral=True)
 
+class JoinRequestView(discord.ui.View):
+    def __init__(self, channel_id, requester_id, guild_id):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.channel_id = channel_id
+        self.requester_id = requester_id
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.green, emoji="✅")
+    async def approve_request(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
+        
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel no longer exists!", ephemeral=True)
+            return
+            
+        info = temp_channels[self.channel_id]
+        if self.requester_id in info.get("pending_requests", []):
+            info["pending_requests"].remove(self.requester_id)
+            save_temp_channels(temp_channels)
+            
+            # Grant access to the channel
+            guild = interaction.client.get_guild(self.guild_id)
+            if guild:
+                channel = guild.get_channel(self.channel_id)
+                requester = guild.get_member(self.requester_id)
+                if channel and requester:
+                    try:
+                        overwrites = channel.overwrites
+                        overwrites[requester] = discord.PermissionOverwrite(connect=True, view_channel=True)
+                        await channel.edit(overwrites=overwrites, reason="Join request approved")
+                        
+                        # Notify requester
+                        try:
+                            await requester.send(f"✅ Your request to join **{channel.name}** in **{guild.name}** has been approved! You can now join the channel.")
+                        except:
+                            pass
+                            
+                        await interaction.response.send_message(f"✅ Approved {requester.display_name}'s request to join {channel.name}!", ephemeral=True)
+                    except discord.Forbidden:
+                        await interaction.response.send_message("❌ I don't have permission to edit the channel.", ephemeral=True)
+                else:
+                    await interaction.response.send_message("❌ Channel or user not found!", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Server not found!", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Request not found or already processed!", ephemeral=True)
+
+    @discord.ui.button(label="Deny", style=discord.ButtonStyle.red, emoji="❌")
+    async def deny_request(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from data import load_temp_channels, save_temp_channels
+        temp_channels = load_temp_channels()
+        
+        if self.channel_id not in temp_channels:
+            await interaction.response.send_message("❌ Channel no longer exists!", ephemeral=True)
+            return
+            
+        info = temp_channels[self.channel_id]
+        if self.requester_id in info.get("pending_requests", []):
+            info["pending_requests"].remove(self.requester_id)
+            save_temp_channels(temp_channels)
+            
+            # Notify requester
+            guild = interaction.client.get_guild(self.guild_id)
+            if guild:
+                channel = guild.get_channel(self.channel_id)
+                requester = guild.get_member(self.requester_id)
+                if channel and requester:
+                    try:
+                        await requester.send(f"❌ Your request to join **{channel.name}** in **{guild.name}** has been denied.")
+                    except:
+                        pass
+                    await interaction.response.send_message(f"❌ Denied {requester.display_name}'s request to join {channel.name}.", ephemeral=True)
+                else:
+                    await interaction.response.send_message("❌ Channel or user not found!", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Server not found!", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ Request not found or already processed!", ephemeral=True)
+
 class ApproveDenyView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -532,22 +612,9 @@ class ApproveDenyView(discord.ui.View):
 
 class ListChannelsView(discord.ui.View):
     def __init__(self, user_id, guild):
-        super().__init__(timeout=60)
+        super().__init__(timeout=120)
         self.user_id = user_id
         self.guild = guild
-
-        from data import load_temp_channels
-        temp_channels = load_temp_channels()
-
-        for cid, info in temp_channels.items():
-            if (
-                info.get("request_only")
-                and info["owner_id"] != self.user_id
-                and self.user_id not in info.get("pending_requests", [])
-            ):
-                channel = guild.get_channel(cid)
-                if channel:
-                    self.add_item(RequestJoinButton(cid, channel.name, info["owner_id"], self.user_id))
 
     async def send_channel_list(self, interaction: discord.Interaction):
         from data import load_temp_channels
@@ -560,10 +627,12 @@ class ListChannelsView(discord.ui.View):
             return
 
         embed = discord.Embed(
-            title="Active Voice Channels",
+            title="📋 Active Voice Channels",
             color=0x00ff00
         )
 
+        request_only_channels = []
+        
         for cid, info in temp_channels.items():
             channel = guild.get_channel(cid)
             if not channel:
@@ -576,9 +645,31 @@ class ListChannelsView(discord.ui.View):
             access = "🔒 Request Only" if info.get("request_only") else "🌐 Open"
             owner = guild.get_member(info["owner_id"])
             owner_name = owner.mention if owner else f"User ID {info['owner_id']}"
+            
+            # Add member count
+            member_count = len(channel.members) if hasattr(channel, 'members') else 0
+            
             embed.add_field(
-                name=f"{channel.name} (ID: {cid})",
-                value=f"Owner: {owner_name}\nAccess: {access}\nExpires: {expires_str}",
+                name=f"🎤 {channel.name}",
+                value=f"**Owner:** {owner_name}\n**Access:** {access}\n**Members:** {member_count}\n**Expires:** {expires_str}",
+                inline=False
+            )
+            
+            # Check if user can request to join this channel
+            if (info.get("request_only") and 
+                info["owner_id"] != self.user_id and 
+                self.user_id not in info.get("pending_requests", []) and
+                self.user_id not in info.get("blocked_users", [])):
+                request_only_channels.append((cid, channel.name, info["owner_id"]))
+
+        # Add request join buttons for request-only channels
+        for cid, channel_name, owner_id in request_only_channels:
+            self.add_item(RequestJoinButton(cid, channel_name, owner_id, self.user_id))
+
+        if request_only_channels:
+            embed.add_field(
+                name="💡 Tip",
+                value="Use the buttons below to request access to private channels!",
                 inline=False
             )
 
@@ -586,12 +677,16 @@ class ListChannelsView(discord.ui.View):
 
 class RequestJoinButton(discord.ui.Button):
     def __init__(self, channel_id, channel_name, owner_id, requester_id):
+        # Truncate channel name if too long for button label
+        display_name = channel_name[:20] + "..." if len(channel_name) > 20 else channel_name
         super().__init__(
-            label=f"Request to Join: {channel_name}",
-            style=discord.ButtonStyle.primary,
+            label=f"🔐 Join {display_name}",
+            style=discord.ButtonStyle.secondary,
+            emoji="📨",
             custom_id=f"reqjoin_{channel_id}"
         )
         self.channel_id = channel_id
+        self.channel_name = channel_name
         self.owner_id = owner_id
         self.requester_id = requester_id
 
@@ -601,34 +696,55 @@ class RequestJoinButton(discord.ui.Button):
 
         info = temp_channels.get(self.channel_id)
         if not info:
-            await interaction.response.send_message("❌ Channel not found!", ephemeral=True)
+            await interaction.response.send_message("❌ Channel not found or no longer exists!", ephemeral=True)
+            return
+
+        # Check if user is blocked
+        if self.requester_id in info.get("blocked_users", []):
+            await interaction.response.send_message("❌ You have been blocked from this channel.", ephemeral=True)
             return
 
         if "pending_requests" not in info:
             info["pending_requests"] = []
         if self.requester_id in info["pending_requests"]:
-            await interaction.response.send_message("❌ You have already requested to join this channel.", ephemeral=True)
+            await interaction.response.send_message("❌ You have already requested to join this channel. Please wait for the owner's response.", ephemeral=True)
             return
 
         info["pending_requests"].append(self.requester_id)
         save_temp_channels(temp_channels)
 
-        await interaction.response.send_message("✅ Your request to join has been sent to the channel owner.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Your request to join **{self.channel_name}** has been sent to the channel owner!", ephemeral=True)
 
+        # Send DM to channel owner
         owner = interaction.guild.get_member(self.owner_id)
         channel = interaction.guild.get_channel(self.channel_id)
         requester = interaction.user
         if owner and channel:
             try:
                 embed = discord.Embed(
-                    title="Voice Channel Join Request",
-                    description=f"{requester.mention} has requested to join your channel **{channel.name}** in **{interaction.guild.name}**.",
-                    color=0x00ff00
+                    title="🔔 Voice Channel Join Request",
+                    description=f"**{requester.display_name}** ({requester.mention}) has requested to join your channel **{channel.name}** in **{interaction.guild.name}**.",
+                    color=0x3498db
                 )
-                view = ApproveDenyView()
+                embed.set_thumbnail(url=requester.display_avatar.url)
+                embed.add_field(name="Channel", value=channel.name, inline=True)
+                embed.add_field(name="Server", value=interaction.guild.name, inline=True)
+                embed.add_field(name="Requested by", value=f"{requester.display_name}\n{requester.mention}", inline=False)
+                
+                view = JoinRequestView(self.channel_id, requester.id, interaction.guild.id)
                 await owner.send(embed=embed, view=view)
-            except:
-                pass
+            except discord.Forbidden:
+                # If can't DM owner, try to find them in the channel and ping them
+                try:
+                    settings = load_settings()
+                    guild_id = str(interaction.guild.id)
+                    if guild_id in settings:
+                        text_channel_id = settings[guild_id]["text_channel_id"]
+                        text_channel = interaction.guild.get_channel(text_channel_id)
+                        if text_channel:
+                            await text_channel.send(f"🔔 {owner.mention}, **{requester.display_name}** has requested to join your channel **{channel.name}**. Please check your DMs or use the manage channel menu.")
+                except:
+                    pass
 
 async def purge_menu_text_channel(menu_text_channel):
     """Remove all messages from the menu text channel except pinned ones."""
