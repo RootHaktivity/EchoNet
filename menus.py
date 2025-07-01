@@ -100,73 +100,113 @@ class CreateChannelView(discord.ui.View):
     def __init__(self, channel_name):
         super().__init__(timeout=120)
         self.channel_name = channel_name
-        self.duration_days = 1  # Default
-        self.request_only = False  # Default
+        self.duration_days = None  # No default, user must select
+        self.request_only = None  # No default, user must select
+        self.setup_buttons()
 
-        # Duration dropdown
-        duration_options = [
-            discord.SelectOption(label="1 Day", value="1", description="Channel expires in 1 day"),
-            discord.SelectOption(label="3 Days", value="3", description="Channel expires in 3 days"),
-            discord.SelectOption(label="7 Days", value="7", description="Channel expires in 1 week"),
-            discord.SelectOption(label="14 Days", value="14", description="Channel expires in 2 weeks"),
-            discord.SelectOption(label="30 Days", value="30", description="Channel expires in 1 month"),
-            discord.SelectOption(label="60 Days", value="60", description="Channel expires in 2 months")
+    def setup_buttons(self):
+        # Duration buttons - Row 1
+        duration_buttons = [
+            (1, "1 Day", "⏰"),
+            (3, "3 Days", "📅"),
+            (7, "1 Week", "📆"),
+            (14, "2 Weeks", "🗓️"),
+            (30, "1 Month", "📊"),
+            (60, "2 Months", "📈")
         ]
-        duration_select = discord.ui.Select(
-            placeholder="Choose duration...",
-            options=duration_options,
-            custom_id="duration_select"
+        
+        for days, label, emoji in duration_buttons:
+            button = discord.ui.Button(
+                label=label,
+                emoji=emoji,
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"duration_{days}"
+            )
+            button.callback = self.create_duration_callback(days)
+            self.add_item(button)
+
+        # Access type buttons - Row 2
+        open_button = discord.ui.Button(
+            label="Open",
+            emoji="🌐",
+            style=discord.ButtonStyle.secondary,
+            custom_id="access_open",
+            row=1
         )
-        duration_select.callback = self.duration_callback
-        self.add_item(duration_select)
+        open_button.callback = self.create_access_callback(False)
+        self.add_item(open_button)
 
-        # Access type dropdown
-        access_options = [
-            discord.SelectOption(label="Open", value="open", description="Anyone can join immediately", emoji="🌐"),
-            discord.SelectOption(label="Request Only", value="request", description="Users must request to join", emoji="🔒")
-        ]
-        access_select = discord.ui.Select(
-            placeholder="Choose access type...",
-            options=access_options,
-            custom_id="access_select"
+        request_button = discord.ui.Button(
+            label="Request Only",
+            emoji="🔒",
+            style=discord.ButtonStyle.secondary,
+            custom_id="access_request",
+            row=1
         )
-        access_select.callback = self.access_callback
-        self.add_item(access_select)
+        request_button.callback = self.create_access_callback(True)
+        self.add_item(request_button)
 
-    async def duration_callback(self, interaction: discord.Interaction):
-        self.duration_days = int(interaction.data['values'][0])
-        await interaction.response.defer()
-        await self.update_embed(interaction)
+    def create_duration_callback(self, days):
+        async def duration_callback(interaction: discord.Interaction):
+            self.duration_days = days
+            # Update button styles
+            for item in self.children:
+                if isinstance(item, discord.ui.Button) and item.custom_id and item.custom_id.startswith("duration_"):
+                    item.style = discord.ButtonStyle.primary if item.custom_id == f"duration_{days}" else discord.ButtonStyle.secondary
+            await interaction.response.defer()
+            await self.update_embed(interaction)
+        return duration_callback
 
-    async def access_callback(self, interaction: discord.Interaction):
-        self.request_only = interaction.data['values'][0] == "request"
-        await interaction.response.defer()
-        await self.update_embed(interaction)
+    def create_access_callback(self, request_only):
+        async def access_callback(interaction: discord.Interaction):
+            self.request_only = request_only
+            # Update button styles
+            for item in self.children:
+                if isinstance(item, discord.ui.Button) and item.custom_id and item.custom_id.startswith("access_"):
+                    if (item.custom_id == "access_request" and request_only) or (item.custom_id == "access_open" and not request_only):
+                        item.style = discord.ButtonStyle.primary
+                    else:
+                        item.style = discord.ButtonStyle.secondary
+            await interaction.response.defer()
+            await self.update_embed(interaction)
+        return access_callback
 
     async def update_embed(self, interaction: discord.Interaction):
-        access_text = "🔒 Request Only" if self.request_only else "🌐 Open"
+        duration_text = f"{self.duration_days} day(s)" if self.duration_days is not None else "Not selected"
+        access_text = "🔒 Request Only" if self.request_only is True else ("🌐 Open" if self.request_only is False else "Not selected")
+        
         embed = discord.Embed(
             title="🎤 Create Voice Channel",
-            description=f"**Channel Name:** {self.channel_name}\n**Duration:** {self.duration_days} day(s)\n**Access Type:** {access_text}",
+            description=f"**Channel Name:** {self.channel_name}\n**Duration:** {duration_text}\n**Access Type:** {access_text}",
             color=0x00ff00
         )
         
+        # Show instructions if selections are incomplete
+        if self.duration_days is None or self.request_only is None:
+            embed.add_field(
+                name="Instructions",
+                value="Please select both duration and access type to continue.",
+                inline=False
+            )
+        
         # Enable create button if both selections are made
-        create_button = discord.ui.Button(
-            label="Create Channel",
-            style=discord.ButtonStyle.green,
-            emoji="✅",
-            custom_id="create_channel_final"
-        )
-        create_button.callback = self.create_channel
+        if self.duration_days is not None and self.request_only is not None:
+            # Remove old create button if it exists
+            for item in self.children:
+                if isinstance(item, discord.ui.Button) and item.custom_id == "create_channel_final":
+                    self.remove_item(item)
+                    break
+            
+            create_button = discord.ui.Button(
+                label="Create Channel",
+                style=discord.ButtonStyle.green,
+                emoji="✅",
+                custom_id="create_channel_final",
+                row=2
+            )
+            create_button.callback = self.create_channel
+            self.add_item(create_button)
         
-        # Remove old create button if it exists
-        for item in self.children:
-            if isinstance(item, discord.ui.Button) and item.custom_id == "create_channel_final":
-                self.remove_item(item)
-                break
-        
-        self.add_item(create_button)
         await interaction.edit_original_response(embed=embed, view=self)
 
     async def create_channel(self, interaction: discord.Interaction):
