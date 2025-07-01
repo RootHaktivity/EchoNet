@@ -20,7 +20,8 @@ class MainMenu(discord.ui.View):
             await interaction.response.send_message("❌ Setup not complete. Please ask an admin to run `!echonetsetup` first.", ephemeral=True)
             return
 
-        category_id = settings[guild_id]["category_id"]
+        # Support both old and new setup formats
+        category_id = settings[guild_id].get("voice_category_id", settings[guild_id].get("category_id"))
         category = interaction.guild.get_channel(category_id)
 
         if not category:
