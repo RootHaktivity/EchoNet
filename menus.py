@@ -1406,3 +1406,4 @@ class ManagePendingRequestsView(discord.ui.View):
                 except:
                     pass
                 await interaction.response.send_message(f"❌ Denied {user.display_name}'s request.", ephemeral=True)
+                
