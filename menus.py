@@ -81,6 +81,48 @@ class MainMenu(discord.ui.View):
         view = ListChannelsView(interaction.user.id, interaction.guild)
         await view.send_channel_list(interaction)
 
+    @discord.ui.button(label="❓ Help", style=discord.ButtonStyle.secondary, custom_id="mainmenu_help")
+    async def show_help(self, interaction, button):
+        embed = discord.Embed(
+            title="🎤 EchoNet Voice Channel Bot - Quick Help",
+            description="Create your own temporary voice channels with custom settings!",
+            color=0x3498db
+        )
+        
+        embed.add_field(
+            name="🎮 How to Get Started",
+            value="1. **Click 'Create Voice Channel'** - Green button above\n2. **Choose settings** - Pick duration and access type\n3. **Manage your channel** - Use the management buttons",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="⚙️ Channel Settings",
+            value="**Duration:** 1 day to 2 months\n**Access Types:**\n• 🌐 **Open** - Anyone can join\n• 🔒 **Request Only** - Users must request access",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🛠️ Managing Your Channel",
+            value="**Owner Controls:**\n• Kick/invite users\n• Block/unblock users\n• Transfer ownership\n• Change access type\n• Extend duration\n• Set user limits\n• Delete channel early",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="🔐 Joining Private Channels",
+            value="**For Request-Only channels:**\n1. Click '📋 List Channels' to see available channels\n2. Click the 'Join' button for private channels\n3. Wait for owner approval\n4. You'll get a DM when approved/denied",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="💡 Tips",
+            value="• Channels automatically delete when they expire\n• You can extend duration before expiration\n• Blocked users can't see or join your channel\n• Only channel owners can manage settings",
+            inline=False
+        )
+        
+        embed.set_footer(text="EchoNet Bot - Making voice channels easy! Use !help for more detailed help.")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 class CreateChannelModal(discord.ui.Modal, title="Create Voice Channel"):
     def __init__(self):
         super().__init__()
