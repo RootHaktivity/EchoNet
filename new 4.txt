@@ -1,0 +1,147 @@
+import time
+import random
+import os
+
+# Function to simulate typing effect
+def type_effect(text, delay=0.05):
+    for char in text:
+        print(char, end='', flush=True)
+        time.sleep(delay)
+    print()
+
+# Function to simulate a progress bar
+def progress_bar(task, duration=3):
+    print(f"{task} Progress: [", end='', flush=True)
+    for i in range(20):
+        print("=", end='', flush=True)
+        time.sleep(duration / 20)
+    print("] 100%")
+
+# Banner
+def display_banner():
+    os.system('clear' if os.name == 'posix' else 'cls')
+    print(r"""
+// ╔╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╤╗
+// ╟┼┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┴┼╢
+// ╟┤██╗   ██╗ █████╗ ██╗   ██╗██╗  ████████╗██████╗ ██████╗ ███████╗ █████╗ ██╗  ██╗███████╗██████╗ ├╢
+// ╟┤██║   ██║██╔══██╗██║   ██║██║  ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██╔══██╗██║ ██╔╝██╔════╝██╔══██╗├╢
+// ╟┤██║   ██║███████║██║   ██║██║     ██║   ██████╔╝██████╔╝█████╗  ███████║█████╔╝ █████╗  ██████╔╝├╢
+// ╟┤╚██╗ ██╔╝██╔══██║██║   ██║██║     ██║   ██╔══██╗██╔══██╗██╔══╝  ██╔══██║██╔═██╗ ██╔══╝  ██╔══██╗├╢
+// ╟┤ ╚████╔╝ ██║  ██║╚██████╔╝███████╗██║   ██████╔╝██║  ██║███████╗██║  ██║██║  ██╗███████╗██║  ██║├╢
+// ╟┤  ╚═══╝  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝   ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝├╢
+// ╟┼┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┬┼╢
+// ╚╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╧╝
+    """)
+    print("Version: 2.3.1")
+    print("Author: 𝕃𝔼𝔼𝔾𝕀𝕆𝙉")
+    print("Disclaimer: For educational purposes only.")
+    print('"The quieter you become, the more you can hear." – Ram Dass\n')
+
+# Simulate connecting to the TOR network
+def connect_to_tor():
+    type_effect("Starting TOR service...")
+    time.sleep(1)
+    type_effect("Command: sudo service tor start")
+    time.sleep(1)
+    type_effect("Command: tor --version")
+    time.sleep(1)
+    type_effect("TOR version 0.4.7.13")
+    time.sleep(1)
+    type_effect("Command: tor --run")
+    time.sleep(1)
+    type_effect("Bootstrapped 100%: Done")
+    type_effect("Connected to the TOR network.\n")
+
+# Simulate searching for leaked content
+def search_leaked_content(name):
+    type_effect(f"Searching for leaked content related to '{name}'...")
+    progress_bar("Search", duration=5)
+    time.sleep(1)
+    directory = f"/darknet/files/{name}/"
+    file_pool = [
+        "private_photoshoot_01.jpg", "intimate_chat_log_2025.txt", "exclusive_video_01.mp4",
+        "hidden_folder_backup.zip", "personal_moments.mov", "sensitive_photos_02.png",
+        "private_conversation_2024.txt", "intimate_video_clip.mp4", "leaked_photoshoot_03.jpg",
+        "confidential_notes.docx", "backup_2025.rar", "private_dance_video.mp4",
+        "screenshot_2023_01.png", "hidden_camera_footage.mov", "personal_diary_2024.docx",
+        "sensitive_chat_log.txt", "deleted_files_backup.zip", "encrypted_data_2025.7z",
+        "exclusive_content_2025.mp4", "private_photoshoot_02.jpg", "chat_log_2023.txt",
+        "intimate_moments_01.mp4", "leaked_private_video.mov", "hidden_folder_2024.zip",
+        "personal_vacation_photos.jpg", "private_audio_recording.mp3", "sensitive_video_clip.mp4",
+        "exclusive_bikini_photos.jpg", "intimate_selfie_01.png", "private_party_video.mp4",
+        "leaked_snapchat_story.mov", "hidden_webcam_footage.mp4", "personal_fitness_video.mp4",
+        "deleted_instagram_photos.zip", "exclusive_lingerie_photoshoot.jpg",
+        "private_dance_performance.mov", "sensitive_text_messages.txt", "hidden_folder_backup_2023.zip",
+        "intimate_couple_video.mp4", "leaked_onlyfans_content_2025.mp4", "private_stream_recording.mov"
+    ]
+    # Randomly select 40–60 files from the pool
+    results = [f"{directory}{random.choice(file_pool)}" for _ in range(random.randint(40, 60))]
+    type_effect("Search complete. Found the following files:\n")
+    for result in results:
+        type_effect(f"  {result}")
+    print()
+    return results
+
+# Simulate file deletion
+def delete_files(files):
+    for file in files:
+        type_effect(f"Removing file: {file}")
+        time.sleep(0.5)
+        type_effect("File removed successfully.")
+    print()
+
+# Simulate hacking the site with user input
+def hack_site():
+    type_effect("Preparing to hack the target site...\n")
+    while True:
+        command = input("Enter hacking command: ").strip()
+        if command == "exit":
+            type_effect("Exiting hacking session...\n")
+            break
+        elif command.startswith("exploit"):
+            type_effect("Exploiting target...")
+            time.sleep(2)
+            type_effect("Exploit successful.")
+        elif command.startswith("inject_payload"):
+            type_effect("Injecting payload...")
+            time.sleep(2)
+            type_effect("Payload injected successfully.")
+        elif command.startswith("shutdown_service"):
+            type_effect("Shutting down target service...")
+            time.sleep(2)
+            type_effect("Service shut down successfully.")
+        else:
+            type_effect("Unknown command. Try again or type 'exit' to quit.")
+
+# Simulate clearing logs
+def clear_logs():
+    type_effect("Clearing logs...")
+    time.sleep(2)
+    type_effect("Logs cleared successfully.\n")
+
+# Main program
+def main():
+    display_banner()
+    connect_to_tor()
+    
+    # User input
+    name = input("Enter the name of the person whose content you want to search for: ")
+    print()
+    
+    # Search for leaked content
+    files = search_leaked_content(name)
+    
+    # Ask user if they want to delete the files
+    choice = input("Do you want to delete these files? (yes/no): ").strip().lower()
+    print()
+    if choice == "yes":
+        delete_files(files)
+        hack_site()
+        clear_logs()
+        type_effect("Operation complete. Exiting VaultBreaker.")
+    else:
+        type_effect("Files retained. Exiting program.")
+
+# Run the program
+if __name__ == "__main__":
+    main()
